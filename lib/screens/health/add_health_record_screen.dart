@@ -10,6 +10,7 @@ import '../../data/session.dart';
 import '../../models/models.dart';
 import '../../repositories/health_repository.dart';
 import '../../repositories/pet_repository.dart';
+import '../../services/local_notifications.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 
@@ -127,7 +128,7 @@ class _AddHealthRecordScreenState extends State<AddHealthRecordScreen> {
       switch (type) {
         case HealthRecordType.vaccine:
           final next = _nextDate.text.trim();
-          await _health.insertVaccine(Vaccine(
+          final vaccineId = await _health.insertVaccine(Vaccine(
             petId: petId,
             name: _title.text.trim(),
             date: _date.text.trim(),
@@ -135,18 +136,33 @@ class _AddHealthRecordScreenState extends State<AddHealthRecordScreen> {
             vet: _vet.text.trim().isEmpty ? '—' : _vet.text.trim(),
             status: healthStatusFromNextDate(next),
           ));
+          await LocalNotifications.instance.scheduleVaccine(
+            id: vaccineId,
+            name: _title.text.trim(),
+            nextDate: next,
+            recordInApp: true,
+          );
         case HealthRecordType.treatment:
           final total = int.tryParse(_days.text.trim()) ?? 7;
-          await _health.insertTreatment(Treatment(
+          final treatmentName = _title.text.trim();
+          final dosage =
+              _dosage.text.trim().isEmpty ? '—' : _dosage.text.trim();
+          final treatmentId = await _health.insertTreatment(Treatment(
             petId: petId,
-            name: _title.text.trim(),
-            dosage:
-                _dosage.text.trim().isEmpty ? '—' : _dosage.text.trim(),
+            name: treatmentName,
+            dosage: dosage,
             frequency: _frequency,
             currentDay: 0,
             totalDays: total.clamp(1, 365),
             icon: Icons.medication_rounded,
           ));
+          await LocalNotifications.instance.scheduleTreatment(
+            id: treatmentId,
+            name: treatmentName,
+            dosage: dosage,
+            active: true,
+            recordInApp: true,
+          );
         case HealthRecordType.consultation:
           await _health.insertEvent(MedicalEvent(
             petId: petId,

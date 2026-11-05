@@ -4,6 +4,7 @@ import '../../data/session.dart';
 import '../../models/models.dart';
 import '../../repositories/pet_repository.dart';
 import '../../repositories/reminder_repository.dart';
+import '../../services/local_notifications.dart';
 import '../../widgets/common.dart';
 
 class CustomReminderScreen extends StatefulWidget {
@@ -43,7 +44,7 @@ class _CustomReminderScreenState extends State<CustomReminderScreen> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    await ReminderRepository().insertCustomReminder(CustomReminder(
+    final reminder = CustomReminder(
       petId: _pets.isEmpty ? null : _pets[_pet].id,
       title: _title.text.trim(),
       category: _category,
@@ -51,7 +52,22 @@ class _CustomReminderScreenState extends State<CustomReminderScreen> {
       time: _time.text.trim(),
       repeat: _repeat,
       note: _note.text.trim(),
-    ));
+    );
+    final reminderId =
+        await ReminderRepository().insertCustomReminder(reminder);
+    await LocalNotifications.instance.scheduleCustom(
+      CustomReminder(
+        id: reminderId,
+        petId: reminder.petId,
+        title: reminder.title,
+        category: reminder.category,
+        date: reminder.date,
+        time: reminder.time,
+        repeat: reminder.repeat,
+        note: reminder.note,
+      ),
+      soonIfPast: true,
+    );
     if (!mounted) return;
     Navigator.pop(context);
     showSuccessSnack(context, 'Rappel créé');

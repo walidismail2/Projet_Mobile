@@ -7,6 +7,7 @@ import 'firebase_options.dart';
 import 'screens/auth/welcome_screen.dart';
 import 'screens/main_shell.dart';
 import 'screens/vet/vet_shell.dart';
+import 'services/local_notifications.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -19,7 +20,11 @@ Future<void> main() async {
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await AppDatabase.instance.database;
+  await LocalNotifications.instance.init();
   final loggedIn = await Session.instance.restore();
+  if (loggedIn) {
+    await LocalNotifications.instance.syncForCurrentUser();
+  }
   runApp(PetCareApp(startLoggedIn: loggedIn));
 }
 

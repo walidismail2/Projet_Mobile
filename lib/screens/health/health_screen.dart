@@ -9,6 +9,7 @@ import '../../models/models.dart';
 import '../../repositories/health_repository.dart';
 import '../../repositories/pet_repository.dart';
 import '../../theme/app_theme.dart';
+import '../../services/local_notifications.dart';
 import '../../widgets/common.dart';
 import 'add_health_record_screen.dart';
 
@@ -271,26 +272,46 @@ class _HealthScreenState extends State<HealthScreen> {
                 : 'Rappel dans $days j';
 
     return AppCard(
-      child: ListTile(
-        leading: const IconBadge(Icons.vaccines, AppColors.health),
-        title: Text(v.name),
-        subtitle: Text(
-          '${v.date} → ${v.nextDate}\n${v.vet}\n$detail',
-        ),
-        isThreeLine: true,
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            StatusPill(v.status.label, _statusColor(v.status)),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, size: 20),
-              onPressed: () => _confirmDelete(
-                v.name,
-                () => _healthRepo.deleteVaccine(v.id!),
+      padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const IconBadge(Icons.vaccines, AppColors.health),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(v.name,
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${v.date} → ${v.nextDate}\n${v.vet}\n$detail',
+                      style: const TextStyle(
+                          color: AppColors.textSecondary, fontSize: 13),
+                    ),
+                    const SizedBox(height: 8),
+                    StatusPill(v.status.label, _statusColor(v.status)),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 20),
+                onPressed: () => _confirmDelete(
+                  v.name,
+                  () async {
+                    await _healthRepo.deleteVaccine(v.id!);
+                    await LocalNotifications.instance
+                        .cancel(LocalNotifications.vaccineId(v.id!));
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -326,7 +347,11 @@ class _HealthScreenState extends State<HealthScreen> {
                   icon: const Icon(Icons.delete_outline, size: 20),
                   onPressed: () => _confirmDelete(
                     t.name,
-                    () => _healthRepo.deleteTreatment(t.id!),
+                    () async {
+                      await _healthRepo.deleteTreatment(t.id!);
+                      await LocalNotifications.instance
+                          .cancel(LocalNotifications.treatmentId(t.id!));
+                    },
                   ),
                 ),
               ],
@@ -348,6 +373,10 @@ class _HealthScreenState extends State<HealthScreen> {
                 child: TextButton.icon(
                   onPressed: () async {
                     await _healthRepo.advanceTreatmentDay(t);
+                    if (t.currentDay + 1 >= t.totalDays && t.id != null) {
+                      await LocalNotifications.instance
+                          .cancel(LocalNotifications.treatmentId(t.id!));
+                    }
                     await _loadHealth();
                   },
                   icon: const Icon(Icons.check_circle_outline, size: 18),

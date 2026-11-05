@@ -5,6 +5,7 @@ import '../../data/session.dart';
 import '../../models/models.dart';
 import '../../repositories/appointment_repository.dart';
 import '../../repositories/pet_repository.dart';
+import '../../services/local_notifications.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 
@@ -75,7 +76,7 @@ class _BookingScreenState extends State<BookingScreen> {
       return;
     }
     final pet = _pets[_pet];
-    await _apptRepo.insert(Appointment(
+    final appointment = Appointment(
       vetId: widget.vet.id,
       petId: pet.id!,
       date: '${_days[_day].$1} ${_days[_day].$2} octobre',
@@ -84,7 +85,22 @@ class _BookingScreenState extends State<BookingScreen> {
       time: _time,
       reason: _reason,
       status: AppointmentStatus.upcoming,
-    ));
+    );
+    final appointmentId = await _apptRepo.insert(appointment);
+    await LocalNotifications.instance.scheduleAppointment(
+      Appointment(
+        id: appointmentId,
+        vetId: appointment.vetId,
+        petId: appointment.petId,
+        date: appointment.date,
+        day: appointment.day,
+        month: appointment.month,
+        time: appointment.time,
+        reason: appointment.reason,
+        status: appointment.status,
+      ),
+      recordInApp: true,
+    );
     AppRefresh.instance.appointmentsChanged();
     if (!mounted) return;
     await showDialog(

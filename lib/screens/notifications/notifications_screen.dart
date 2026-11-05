@@ -107,7 +107,24 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 }
                 final items = snap.data!;
                 if (items.isEmpty) {
-                  return const Center(child: Text('Aucune notification'));
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.notifications_off_outlined,
+                              size: 42, color: AppColors.textSecondary),
+                          SizedBox(height: 12),
+                          Text(
+                            'Aucune alerte pour le moment',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: AppColors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
                 }
                 return ListView.builder(
                   padding: const EdgeInsets.all(16),

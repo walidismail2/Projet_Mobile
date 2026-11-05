@@ -2,13 +2,19 @@
 
 Application de gestion d’animaux domestiques.
 
-## Architecture
+## Architecture — moitié locale, moitié cloud
 
-- **Propriétaire** : animaux / santé / repas (suivi) / RDV — SQLite + sync animaux Firestore
-- **Vétérinaire** : prescrit **régime** + aliments autorisés/interdits (Firestore)
-- **Firebase Auth** : comptes `owner` ou `vet`
-- **Firestore** : profils, animaux (cloud), régimes, aliments, annuaire vétos (recherche RDV)
-- **SQLite** : santé (vaccins, traitements, consultations, documents), repas, RDV, cache vétos
+Règle : **SQLite** = journal privé du propriétaire (fonctionne hors ligne). **Firebase** = données partagées entre le propriétaire et le vétérinaire.
+
+| SQLite (local) | Firebase |
+|---|---|
+| Vaccins, traitements, consultations | Compte Auth + profil `users` |
+| Documents PDF / images (fichier sur le téléphone) | Fiche animal (copie, pour que le véto retrouve l’animal) |
+| Repas du jour (fait / pas fait) | Régime prescrit + aliments autorisés / interdits |
+| Rendez-vous | Annuaire des vétérinaires |
+| Rappels | |
+
+L’animal est **écrit d’abord en SQLite**, puis une copie (nom, espèce, puce, e-mail du propriétaire) part sur Firestore. Si le réseau coupe, l’app locale continue.
 
 Onglets propriétaire : Accueil, Animaux, Santé, RDV, Repas.
 
@@ -77,6 +83,18 @@ service cloud.firestore {
   }
 }
 ```
+
+## Notifications
+
+Alertes **locales** sur le téléphone (`flutter_local_notifications`), pas une simple liste.
+
+- Vaccin : le matin du rappel (si la date est déjà passée, une alerte part tout de suite)
+- Traitement : chaque jour à 9h, jusqu’à ce qu’il soit terminé
+- Repas : chaque jour à l’heure du repas
+- Rendez-vous : 1 h avant (si le créneau est déjà passé, une alerte part à la réservation)
+- Rappel personnalisé : à la date et l’heure choisies
+
+Les interrupteurs (types, son, vibration, 22h–7h) sont dans **Notifications → réglages**. Tout reste sur l’appareil.
 
 ## Lancer
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/session.dart';
 import '../../repositories/auth_repository.dart';
+import '../../services/local_notifications.dart';
 import '../../services/app_exception.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
@@ -42,6 +43,7 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _password.text,
         remember: _remember,
       );
+      await LocalNotifications.instance.syncForCurrentUser();
       if (!mounted) return;
       final home = Session.instance.currentUser?.isVet == true
           ? const VetShell()

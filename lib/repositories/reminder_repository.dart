@@ -27,21 +27,44 @@ class ReminderRepository {
           );
     return rows
         .map(AppNotification.fromMap)
-        .where((n) => n.petId != null && petIds.contains(n.petId))
+        .where((n) => n.petId == null || petIds.contains(n.petId))
         .toList();
+  }
+
+  Future<int> unreadCount() async {
+    final items = await getNotifications();
+    return items.where((n) => n.unread).length;
   }
 
   Future<void> markAllRead() async {
     final petIds = await _ownerPetIds();
-    if (petIds.isEmpty) return;
     final db = await _db.database;
+    if (petIds.isEmpty) {
+      await db.update(
+        'notifications',
+        {'unread': 0},
+        where: 'pet_id IS NULL',
+      );
+      return;
+    }
     final placeholders = List.filled(petIds.length, '?').join(',');
     await db.update(
       'notifications',
       {'unread': 0},
-      where: 'pet_id IN ($placeholders)',
+      where: 'pet_id IS NULL OR pet_id IN ($placeholders)',
       whereArgs: petIds.toList(),
     );
+  }
+
+  Future<List<CustomReminder>> getCustomReminders() async {
+    final db = await _db.database;
+    final rows = await db.query('custom_reminders', orderBy: 'id DESC');
+    return rows.map(CustomReminder.fromMap).toList();
+  }
+
+  Future<void> insertNotification(AppNotification notification) async {
+    final db = await _db.database;
+    await db.insert('notifications', notification.toMap()..remove('id'));
   }
 
   Future<int> insertCustomReminder(CustomReminder r) async {

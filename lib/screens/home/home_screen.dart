@@ -4,7 +4,9 @@ import '../../data/app_refresh.dart';
 import '../../data/session.dart';
 import '../../models/models.dart';
 import '../../repositories/appointment_repository.dart';
+import '../../repositories/health_repository.dart';
 import '../../repositories/pet_repository.dart';
+import '../../repositories/reminder_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../notifications/notifications_screen.dart';
@@ -53,7 +55,24 @@ class _HomeScreenState extends State<HomeScreen> {
       final next = appts
           .where((a) => a.status == AppointmentStatus.upcoming)
           .toList();
-      return _Data(pets: pets, next: next.isEmpty ? null : next.first);
+      final health = HealthRepository();
+      var watch = 0;
+      var treatments = 0;
+      for (final pet in pets) {
+        final id = pet.id;
+        if (id == null) continue;
+        final summary = await health.summaryForPet(id);
+        watch += summary.vaccinesLate;
+        treatments += summary.treatmentsActive;
+      }
+      final unread = await ReminderRepository().unreadCount();
+      return _Data(
+        pets: pets,
+        next: next.isEmpty ? null : next.first,
+        vaccinesToWatch: watch,
+        activeTreatments: treatments,
+        unread: unread,
+      );
     }();
   }
 
@@ -107,13 +126,18 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: Theme.of(context).textTheme.titleLarge),
                     ),
                     RoundIconButton(
-                      Icons.notifications_none_rounded,
-                      badge: true,
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const NotificationsScreen()),
-                      ),
+                      data.unread > 0
+                          ? Icons.notifications_rounded
+                          : Icons.notifications_none_rounded,
+                      badge: data.unread > 0,
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const NotificationsScreen()),
+                        );
+                        if (mounted) setState(_reload);
+                      },
                     ),
                   ],
                 ),
@@ -253,6 +277,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     const SizedBox(height: 16),
+                    _HealthBanner(
+                      vaccinesToWatch: data.vaccinesToWatch,
+                      activeTreatments: data.activeTreatments,
+                      hasPets: data.pets.isNotEmpty,
+                      onTap: () => widget.onNavigate(2),
+                    ),
+                    const SizedBox(height: 16),
                     Row(
                       children: [
                         Expanded(
@@ -322,5 +353,75 @@ class _HomeScreenState extends State<HomeScreen> {
 class _Data {
   final List<Pet> pets;
   final Appointment? next;
-  _Data({required this.pets, required this.next});
+  final int vaccinesToWatch;
+  final int activeTreatments;
+  final int unread;
+
+  _Data({
+    required this.pets,
+    required this.next,
+    this.vaccinesToWatch = 0,
+    this.activeTreatments = 0,
+    this.unread = 0,
+  });
+}
+
+class _HealthBanner extends StatelessWidget {
+  final int vaccinesToWatch;
+  final int activeTreatments;
+  final bool hasPets;
+  final VoidCallback onTap;
+
+  const _HealthBanner({
+    required this.vaccinesToWatch,
+    required this.activeTreatments,
+    required this.hasPets,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final alert = vaccinesToWatch > 0;
+    final color = alert ? AppColors.reminder : AppColors.health;
+    final title = !hasPets
+        ? 'Ajoutez un animal'
+        : alert
+            ? '$vaccinesToWatch vaccin${vaccinesToWatch > 1 ? 's' : ''} à surveiller'
+            : 'Vaccins à jour';
+    final subtitle = !hasPets
+        ? 'Le suivi santé commence ici'
+        : activeTreatments == 0
+            ? 'Aucun traitement en cours'
+            : '$activeTreatments traitement${activeTreatments > 1 ? 's' : ''} en cours';
+
+    return AppCard(
+      onTap: onTap,
+      color: color.withValues(alpha: 0.12),
+      child: Row(
+        children: [
+          IconBadge(
+            alert ? Icons.warning_amber_rounded : Icons.favorite_rounded,
+            color,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w800, color: AppColors.navy)),
+                const SizedBox(height: 2),
+                Text(subtitle,
+                    style: const TextStyle(
+                        color: AppColors.textSecondary, fontSize: 13)),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right_rounded,
+              color: AppColors.textSecondary),
+        ],
+      ),
+    );
+  }
 }

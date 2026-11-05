@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/session.dart';
+import '../../services/local_notifications.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import 'custom_reminder_screen.dart';
@@ -61,11 +62,12 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
               onChanged: (v) async {
                 setState(() => _master = v);
                 await p.setMasterNotifications(v);
+                await LocalNotifications.instance.syncForCurrentUser();
               },
               title: const Text('Notifications activées',
                   style: TextStyle(
                       color: Colors.white, fontWeight: FontWeight.w800)),
-              subtitle: const Text('Préférences locales',
+              subtitle: const Text('Alertes sur le téléphone',
                   style: TextStyle(color: Colors.white70)),
               activeThumbColor: Colors.white,
               activeTrackColor: Colors.white54,
@@ -83,6 +85,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                       : (v) async {
                           setState(() => _vaccines = v);
                           await p.setReminderEnabled('vaccine', v);
+                          await LocalNotifications.instance.syncForCurrentUser();
                         },
                   secondary:
                       const IconBadge(Icons.vaccines, AppColors.health),
@@ -95,6 +98,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                       : (v) async {
                           setState(() => _treatments = v);
                           await p.setReminderEnabled('treatment', v);
+                          await LocalNotifications.instance.syncForCurrentUser();
                         },
                   secondary:
                       const IconBadge(Icons.medication, AppColors.purple),
@@ -107,6 +111,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                       : (v) async {
                           setState(() => _appointments = v);
                           await p.setReminderEnabled('appointment', v);
+                          await LocalNotifications.instance.syncForCurrentUser();
                         },
                   secondary: const IconBadge(Icons.event, AppColors.vet),
                   title: const Text('Rendez-vous'),
@@ -118,6 +123,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                       : (v) async {
                           setState(() => _meals = v);
                           await p.setReminderEnabled('meal', v);
+                          await LocalNotifications.instance.syncForCurrentUser();
                         },
                   secondary:
                       const IconBadge(Icons.restaurant, AppColors.food),
@@ -136,6 +142,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                   onChanged: (v) async {
                     setState(() => _sound = v);
                     await p.setBool('sound', v);
+                    await LocalNotifications.instance.syncForCurrentUser();
                   },
                   title: const Text('Son'),
                 ),
@@ -144,6 +151,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                   onChanged: (v) async {
                     setState(() => _vibration = v);
                     await p.setBool('vibration', v);
+                    await LocalNotifications.instance.syncForCurrentUser();
                   },
                   title: const Text('Vibration'),
                 ),
@@ -152,6 +160,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                   onChanged: (v) async {
                     setState(() => _silent = v);
                     await p.setBool('silent_night', v);
+                    await LocalNotifications.instance.syncForCurrentUser();
                   },
                   title: const Text('Heures calmes 22h–7h'),
                 ),

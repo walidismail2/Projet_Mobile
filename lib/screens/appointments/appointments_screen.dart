@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/app_refresh.dart';
 import '../../models/models.dart';
 import '../../repositories/appointment_repository.dart';
+import '../../services/local_notifications.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../vets/vet_search_screen.dart';
@@ -188,6 +189,8 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                                   onPressed: () async {
                                     await _repo.updateStatus(
                                         a.id!, AppointmentStatus.cancelled);
+                                    await LocalNotifications.instance.cancel(
+                                        LocalNotifications.appointmentId(a.id!));
                                     setState(_reload);
                                     if (context.mounted) {
                                       showSuccessSnack(
