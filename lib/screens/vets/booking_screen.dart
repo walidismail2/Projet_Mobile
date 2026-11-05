@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../data/mock_data.dart';
+import '../../data/app_refresh.dart';
+import '../../data/session.dart';
+import '../../models/models.dart';
+import '../../repositories/appointment_repository.dart';
+import '../../repositories/pet_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 
@@ -22,11 +26,14 @@ class _BookingScreenState extends State<BookingScreen> {
     ('Sam', '03'),
     ('Lun', '05'),
     ('Mar', '06'),
-    ('Mer', '07'),
-    ('Jeu', '08'),
   ];
-  static const _morning = ['08:30', '09:00', '09:30', '10:00', '10:30', '11:00'];
-  static const _afternoon = [
+  static const _slots = [
+    '08:30',
+    '09:00',
+    '09:30',
+    '10:00',
+    '10:30',
+    '11:00',
     '14:00',
     '14:30',
     '15:00',
@@ -35,22 +42,51 @@ class _BookingScreenState extends State<BookingScreen> {
     '18:00'
   ];
   static const _unavailable = {'09:00', '10:00', '15:00', '17:30'};
-  static const _reasons = [
-    'Consultation',
-    'Vaccination',
-    'Contrôle',
-    'Urgence',
-    'Chirurgie',
-  ];
+  static const _reasons = ['Consultation', 'Vaccination', 'Contrôle', 'Urgence'];
 
+  final _petsRepo = PetRepository();
+  final _apptRepo = AppointmentRepository();
+  List<Pet> _pets = [];
   int _pet = 0;
   int _day = 2;
   String _time = '10:30';
   String _reason = 'Vaccination';
+  bool _loading = true;
 
-  bool get _isEdit => widget.existing != null;
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final pets = await _petsRepo.getByOwner(Session.instance.userId!);
+    if (mounted) {
+      setState(() {
+        _pets = pets;
+        _loading = false;
+      });
+    }
+  }
 
   Future<void> _confirm() async {
+    if (_pets.isEmpty) {
+      showSuccessSnack(context, 'Ajoutez d\'abord un animal');
+      return;
+    }
+    final pet = _pets[_pet];
+    await _apptRepo.insert(Appointment(
+      vetId: widget.vet.id,
+      petId: pet.id!,
+      date: '${_days[_day].$1} ${_days[_day].$2} octobre',
+      day: _days[_day].$2,
+      month: 'OCT',
+      time: _time,
+      reason: _reason,
+      status: AppointmentStatus.upcoming,
+    ));
+    AppRefresh.instance.appointmentsChanged();
+    if (!mounted) return;
     await showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -59,30 +95,16 @@ class _BookingScreenState extends State<BookingScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 90,
-                height: 90,
-                decoration: BoxDecoration(
-                  color: AppColors.health.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.check_rounded,
-                    color: AppColors.health, size: 54),
-              ),
-              const SizedBox(height: 18),
-              Text(_isEdit ? 'Rendez-vous modifié !' : 'Rendez-vous confirmé !',
+              const Icon(Icons.check_circle, color: AppColors.health, size: 64),
+              const SizedBox(height: 12),
+              Text('Rendez-vous confirmé !',
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
               Text(
-                '${MockData.pets[_pet].name} a rendez-vous avec ${widget.vet.name} '
-                'le ${_days[_day].$1}. ${_days[_day].$2} octobre à $_time.',
+                '${pet.name} · ${widget.vet.name}\n${_days[_day].$1} ${_days[_day].$2} à $_time',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
               ),
-              const SizedBox(height: 14),
-              const StatusPill('Rappel programmé 24 h avant', AppColors.vet,
-                  icon: Icons.notifications_active_rounded),
-              const SizedBox(height: 22),
+              const SizedBox(height: 16),
               FilledButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Parfait !'),
@@ -97,89 +119,84 @@ class _BookingScreenState extends State<BookingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final vet = widget.vet;
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     return Scaffold(
-      appBar: AppBar(
-          title: Text(_isEdit ? 'Modifier le rendez-vous' : 'Prendre rendez-vous')),
+      appBar: AppBar(title: const Text('Prendre rendez-vous')),
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          padding: const EdgeInsets.all(16),
           child: FilledButton(
             onPressed: _confirm,
-            child: Text(_isEdit ? 'Enregistrer les modifications' : 'Confirmer le rendez-vous'),
+            child: const Text('Confirmer le rendez-vous'),
           ),
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: AppCard(
-              child: Row(
-                children: [
-                  VetAvatar(vet, size: 52),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(vet.name,
-                            style: Theme.of(context).textTheme.titleMedium),
-                        Text(vet.clinic,
-                            style: Theme.of(context).textTheme.bodyMedium),
-                      ],
-                    ),
+          AppCard(
+            child: Row(
+              children: [
+                VetAvatar(widget.vet, size: 48),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(widget.vet.name,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Text(widget.vet.clinic),
+                    ],
                   ),
-                  Text(vet.price,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.primary,
-                          fontSize: 16)),
-                ],
-              ),
+                ),
+                Text(widget.vet.price,
+                    style: const TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w800)),
+              ],
             ),
           ),
-          _label('Animal'),
+          const SizedBox(height: 16),
+          const Text('Animal', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
           PetSelector(
-              selected: _pet, onChanged: (i) => setState(() => _pet = i)),
-          _label('Octobre 2026'),
+              pets: _pets,
+              selected: _pet,
+              onChanged: (i) => setState(() => _pet = i)),
+          const SizedBox(height: 16),
+          const Text('Date', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
           SizedBox(
-            height: 84,
+            height: 80,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
               itemCount: _days.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (_, i) {
-                final selected = i == _day;
+                final sel = _day == i;
                 return GestureDetector(
                   onTap: () => setState(() => _day = i),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 62,
+                  child: Container(
+                    width: 56,
                     decoration: BoxDecoration(
-                      color: selected ? AppColors.primary : Colors.white,
-                      borderRadius: BorderRadius.circular(18),
+                      color: sel ? AppColors.primary : Colors.white,
+                      borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                          color:
-                              selected ? AppColors.primary : AppColors.border),
+                          color: sel ? AppColors.primary : AppColors.border),
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(_days[i].$1,
                             style: TextStyle(
-                                color: selected
-                                    ? Colors.white70
-                                    : AppColors.textSecondary,
-                                fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 4),
+                                color: sel ? Colors.white : AppColors.textSecondary)),
                         Text(_days[i].$2,
                             style: TextStyle(
-                                color: selected ? Colors.white : AppColors.navy,
-                                fontSize: 20,
-                                fontWeight: FontWeight.w800)),
+                                fontWeight: FontWeight.w900,
+                                fontSize: 18,
+                                color: sel ? Colors.white : AppColors.navy)),
                       ],
                     ),
                   ),
@@ -187,124 +204,39 @@ class _BookingScreenState extends State<BookingScreen> {
               },
             ),
           ),
-          _label('Matin'),
-          _slots(_morning),
-          _label('Après-midi'),
-          _slots(_afternoon),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-            child: Wrap(
-              spacing: 16,
-              runSpacing: 8,
-              children: [
-                _legend(Colors.white, 'Disponible', border: true),
-                _legend(AppColors.primary, 'Sélectionné'),
-                _legend(AppColors.border, 'Indisponible'),
-              ],
-            ),
+          const SizedBox(height: 16),
+          const Text('Créneau', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final s in _slots)
+                ChoiceChip(
+                  label: Text(s),
+                  selected: _time == s,
+                  onSelected: _unavailable.contains(s)
+                      ? null
+                      : (_) => setState(() => _time = s),
+                ),
+            ],
           ),
-          _label('Motif de la visite'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final r in _reasons)
-                  ChoiceChip(
-                    label: Text(r),
-                    selected: _reason == r,
-                    showCheckmark: false,
-                    onSelected: (_) => setState(() => _reason = r),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 20),
-            child: LabeledField(
-              label: 'Note pour le vétérinaire',
-              hint: 'Symptômes, questions…',
-              maxLines: 3,
-            ),
+          const SizedBox(height: 16),
+          const Text('Motif', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final r in _reasons)
+                ChoiceChip(
+                  label: Text(r),
+                  selected: _reason == r,
+                  onSelected: (_) => setState(() => _reason = r),
+                ),
+            ],
           ),
         ],
       ),
     );
   }
-
-  Widget _label(String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 22, 20, 10),
-        child: Text(text, style: Theme.of(context).textTheme.titleMedium),
-      );
-
-  Widget _legend(Color color, String label, {bool border = false}) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 14,
-            height: 14,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(4),
-              border: border ? Border.all(color: AppColors.border) : null,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(label,
-              style:
-                  const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-        ],
-      );
-
-  Widget _slots(List<String> slots) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: GridView.count(
-          crossAxisCount: 3,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 2.6,
-          children: [
-            for (final s in slots)
-              Builder(builder: (_) {
-                final disabled = _unavailable.contains(s);
-                final selected = s == _time;
-                return GestureDetector(
-                  onTap: disabled ? null : () => setState(() => _time = s),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: disabled
-                          ? AppColors.border
-                          : selected
-                              ? AppColors.primary
-                              : Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color:
-                              selected ? AppColors.primary : AppColors.border),
-                    ),
-                    child: Text(
-                      s,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: disabled
-                            ? AppColors.textSecondary
-                            : selected
-                                ? Colors.white
-                                : AppColors.navy,
-                        decoration:
-                            disabled ? TextDecoration.lineThrough : null,
-                      ),
-                    ),
-                  ),
-                );
-              }),
-          ],
-        ),
-      );
 }

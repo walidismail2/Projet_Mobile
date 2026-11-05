@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/mock_data.dart';
+import '../../models/models.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import 'booking_screen.dart';
@@ -104,16 +104,11 @@ class VetProfileScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           const SectionHeader('Services'),
-          const Wrap(
+          Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              _ServiceChip('Consultation'),
-              _ServiceChip('Vaccination'),
-              _ServiceChip('Chirurgie'),
-              _ServiceChip('Radiologie'),
-              _ServiceChip('Analyses'),
-              _ServiceChip('Identification'),
+              for (final s in vet.services) _ServiceChip(s),
             ],
           ),
           const SizedBox(height: 24),
@@ -135,9 +130,13 @@ class VetProfileScreen extends StatelessWidget {
                 const SizedBox(height: 8),
                 InfoRow(Icons.local_hospital_outlined, 'Clinique', vet.clinic),
                 InfoRow(Icons.place_outlined, 'Adresse', vet.address),
-                const InfoRow(Icons.schedule_rounded, 'Lun – Ven', '08:30 – 19:00'),
-                const InfoRow(Icons.schedule_rounded, 'Samedi', '09:00 – 13:00'),
-                const InfoRow(Icons.phone_outlined, 'Téléphone', '01 43 55 12 34'),
+                InfoRow(Icons.schedule_rounded, 'Lun – Ven', vet.hoursWeekdays),
+                InfoRow(Icons.schedule_rounded, 'Samedi', vet.hoursSaturday),
+                InfoRow(
+                  Icons.phone_outlined,
+                  'Téléphone',
+                  vet.phone.isEmpty ? 'Non renseigné' : vet.phone,
+                ),
               ],
             ),
           ),

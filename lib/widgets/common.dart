@@ -1,6 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
-import '../data/mock_data.dart';
+import '../models/models.dart';
 import '../theme/app_theme.dart';
 
 class AppCard extends StatelessWidget {
@@ -106,10 +108,13 @@ class PetAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final path = pet.photoPath;
+    final hasPhoto = path != null && File(path).existsSync();
     return Container(
       width: size,
       height: size,
       alignment: Alignment.center,
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: pet.color.withValues(alpha: 0.35),
         shape: BoxShape.circle,
@@ -117,7 +122,9 @@ class PetAvatar extends StatelessWidget {
             ? Border.all(color: Colors.white, width: size * 0.05)
             : null,
       ),
-      child: Text(pet.emoji, style: TextStyle(fontSize: size * 0.5)),
+      child: hasPhoto
+          ? Image.file(File(path), width: size, height: size, fit: BoxFit.cover)
+          : Text(pet.emoji, style: TextStyle(fontSize: size * 0.5)),
     );
   }
 }
@@ -198,12 +205,15 @@ class LabeledField extends StatelessWidget {
   final String hint;
   final IconData? icon;
   final String? initialValue;
+  final TextEditingController? controller;
+  final String? Function(String?)? validator;
   final bool obscure;
   final Widget? suffix;
   final TextInputType? keyboardType;
   final int maxLines;
   final bool readOnly;
   final VoidCallback? onTap;
+  final ValueChanged<String>? onChanged;
 
   const LabeledField({
     super.key,
@@ -211,12 +221,15 @@ class LabeledField extends StatelessWidget {
     required this.hint,
     this.icon,
     this.initialValue,
+    this.controller,
+    this.validator,
     this.obscure = false,
     this.suffix,
     this.keyboardType,
     this.maxLines = 1,
     this.readOnly = false,
     this.onTap,
+    this.onChanged,
   });
 
   @override
@@ -236,16 +249,21 @@ class LabeledField extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           TextFormField(
-            initialValue: initialValue,
-            obscureText: obscure,
+            controller: controller,
+            initialValue: controller == null ? initialValue : null,
+            validator: validator,
+            obscureText: obscure && maxLines == 1,
             keyboardType: keyboardType,
-            maxLines: maxLines,
+            maxLines: obscure ? 1 : maxLines,
             readOnly: readOnly,
             onTap: onTap,
+            onChanged: onChanged,
             decoration: InputDecoration(
               hintText: hint,
-              prefixIcon: icon != null ? Icon(icon) : null,
+              // prefixIcon + multiline casse souvent le focus clavier Android
+              prefixIcon: icon != null && maxLines == 1 ? Icon(icon) : null,
               suffixIcon: suffix,
+              alignLabelWithHint: maxLines > 1,
             ),
           ),
         ],
@@ -255,23 +273,35 @@ class LabeledField extends StatelessWidget {
 }
 
 class PetSelector extends StatelessWidget {
+  final List<Pet> pets;
   final int selected;
   final ValueChanged<int> onChanged;
 
-  const PetSelector(
-      {super.key, required this.selected, required this.onChanged});
+  const PetSelector({
+    super.key,
+    required this.pets,
+    required this.selected,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
+    if (pets.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 20),
+        child: Text('Aucun animal',
+            style: TextStyle(color: AppColors.textSecondary)),
+      );
+    }
     return SizedBox(
       height: 52,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 20),
-        itemCount: MockData.pets.length,
+        itemCount: pets.length,
         separatorBuilder: (_, _) => const SizedBox(width: 10),
         itemBuilder: (context, i) {
-          final pet = MockData.pets[i];
+          final pet = pets[i];
           final isSelected = i == selected;
           return GestureDetector(
             onTap: () => onChanged(i),

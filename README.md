@@ -1,17 +1,72 @@
-# flutter_example
+# PetCare — Flutter + SQLite + Firebase
 
-A new Flutter project.
+Application de gestion d’animaux domestiques.
 
-## Getting Started
+## Architecture
 
-This project is a starting point for a Flutter application.
+- **Propriétaire** : animaux / santé / repas (suivi) / RDV — SQLite + sync animaux Firestore
+- **Vétérinaire** : prescrit **régime** + aliments autorisés/interdits (Firestore)
+- **Firebase Auth** : comptes `owner` ou `vet`
+- **Firestore** : profils, animaux (cloud), régimes, aliments, annuaire vétos (recherche RDV)
 
-A few resources to get you started if this is your first Flutter project:
+## Créer un compte vétérinaire
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+1. Dans l’app → **Inscription**
+2. Choisis **Vétérinaire** (segmented button)
+3. Remplis le formulaire → confirme l’e-mail
+4. **Connexion** → tu arrives dans l’**Espace vétérinaire**
+5. Cherche le propriétaire par **e-mail** → ouvre un animal → prescrit le régime
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+> Différent de l’annuaire « Dr. Claire Martin… » (fiches pour prendre RDV).  
+> Le **compte véto** = login pour **prescrire**. L’annuaire = liste publique Firestore `vets`.
+
+### Alternative console Firebase
+
+1. Authentication → ajoute un user (e-mail/mdp)
+2. Firestore → `users/{uid}` avec champs :
+   - `username`, `email`, `role: "vet"`
+
+## Flux alimentation
+
+| Qui | Fait quoi |
+|---|---|
+| Propriétaire | Ajoute repas du jour (SQLite) |
+| Vétérinaire | Prescrit régime + autorisés/interdits (Firestore) |
+| Propriétaire | Voit le régime en **lecture seule** dans Alimentation |
+
+## Règles Firestore (démo)
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /vets/{id} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    match /pets/{id} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    match /pet_diets/{id} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    match /pet_food_items/{id} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+  }
+}
+```
+
+## Lancer
+
+```bash
+flutter run
+```
+
+Pas de backend Node. Internet requis (Firebase).

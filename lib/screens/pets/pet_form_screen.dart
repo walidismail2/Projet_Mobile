@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
-import '../../data/mock_data.dart';
+import '../../data/session.dart';
+import '../../models/models.dart';
+import '../../repositories/pet_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 
 class PetFormScreen extends StatefulWidget {
   final Pet? pet;
-
   const PetFormScreen({super.key, this.pet});
 
   @override
@@ -23,257 +25,234 @@ class _PetFormScreenState extends State<PetFormScreen> {
     ('Autre', '🐾'),
   ];
 
-  late String _selectedSpecies = widget.pet?.species ?? 'Chien';
-  late String _sex = widget.pet?.sex ?? 'Mâle';
-  late bool _sterilized = widget.pet?.sterilized ?? false;
+  final _formKey = GlobalKey<FormState>();
+  final _repo = PetRepository();
+  late final TextEditingController _name;
+  late final TextEditingController _breed;
+  late final TextEditingController _birth;
+  late final TextEditingController _weight;
+  late final TextEditingController _chip;
+  late String _selectedSpecies;
+  late String _sex;
+  late bool _sterilized;
+  String? _photoPath;
+  bool _saving = false;
 
   bool get _isEdit => widget.pet != null;
 
   @override
-  Widget build(BuildContext context) {
-    final pet = widget.pet;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_isEdit ? 'Modifier ${pet!.name}' : 'Ajouter un animal'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        children: [
-          Center(
-            child: Stack(
-              children: [
-                Container(
-                  width: 120,
-                  height: 120,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: pet?.color.withValues(alpha: 0.35) ??
-                        AppColors.primaryLight,
-                    shape: BoxShape.circle,
-                  ),
-                  child: pet != null
-                      ? Text(pet.emoji, style: const TextStyle(fontSize: 60))
-                      : const Icon(Icons.add_a_photo_rounded,
-                          size: 40, color: AppColors.primary),
-                ),
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 3),
-                    ),
-                    child: const Icon(Icons.camera_alt_rounded,
-                        color: Colors.white, size: 18),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Center(
-            child: Text('Ajouter une photo',
-                style: TextStyle(
-                    color: AppColors.primary, fontWeight: FontWeight.w700)),
-          ),
-          const SizedBox(height: 24),
-          const Text('Espèce',
-              style: TextStyle(
-                  fontWeight: FontWeight.w600, color: AppColors.navy)),
-          const SizedBox(height: 10),
-          GridView.count(
-            crossAxisCount: 3,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 1.4,
-            children: [
-              for (final (name, emoji) in _species)
-                GestureDetector(
-                  onTap: () => setState(() => _selectedSpecies = name),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    decoration: BoxDecoration(
-                      color: _selectedSpecies == name
-                          ? AppColors.primaryLight
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: _selectedSpecies == name
-                            ? AppColors.primary
-                            : AppColors.border,
-                        width: 1.5,
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(emoji, style: const TextStyle(fontSize: 26)),
-                        const SizedBox(height: 4),
-                        Text(name,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.navy)),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          LabeledField(
-            label: 'Nom',
-            hint: 'Ex : Rocky',
-            icon: Icons.badge_outlined,
-            initialValue: pet?.name,
-          ),
-          LabeledField(
-            label: 'Race',
-            hint: 'Ex : Golden Retriever',
-            icon: Icons.pets_outlined,
-            initialValue: pet?.breed,
-          ),
-          Row(
-            children: [
-              Expanded(
-                child: LabeledField(
-                  label: 'Date de naissance',
-                  hint: 'JJ/MM/AAAA',
-                  icon: Icons.event_outlined,
-                  initialValue: pet?.birthDate,
-                  readOnly: true,
-                  onTap: () => showDatePicker(
-                    context: context,
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime.now(),
-                    initialDate: DateTime(2023, 4, 12),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: LabeledField(
-                  label: 'Poids (kg)',
-                  hint: 'Ex : 28,5',
-                  icon: Icons.monitor_weight_outlined,
-                  initialValue: pet?.weight.toString(),
-                  keyboardType: TextInputType.number,
-                ),
-              ),
-            ],
-          ),
-          const Text('Sexe',
-              style: TextStyle(
-                  fontWeight: FontWeight.w600, color: AppColors.navy)),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _SexOption(
-                label: 'Mâle',
-                icon: Icons.male_rounded,
-                color: AppColors.vet,
-                selected: _sex == 'Mâle',
-                onTap: () => setState(() => _sex = 'Mâle'),
-              ),
-              const SizedBox(width: 12),
-              _SexOption(
-                label: 'Femelle',
-                icon: Icons.female_rounded,
-                color: AppColors.reminder,
-                selected: _sex == 'Femelle',
-                onTap: () => setState(() => _sex = 'Femelle'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          LabeledField(
-            label: 'Numéro de puce / tatouage',
-            hint: '250 26 …',
-            icon: Icons.memory_outlined,
-            initialValue: pet?.chip,
-          ),
-          const LabeledField(
-            label: 'Couleur / signes distinctifs',
-            hint: 'Ex : pelage doré, tache blanche sur le torse',
-            icon: Icons.palette_outlined,
-          ),
-          AppCard(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _sterilized,
-              onChanged: (v) => setState(() => _sterilized = v),
-              title: const Text('Stérilisé(e)',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w600, color: AppColors.navy)),
-              subtitle: const Text('L\'animal est-il stérilisé ?'),
-            ),
-          ),
-          const SizedBox(height: 28),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              showSuccessSnack(
-                context,
-                _isEdit
-                    ? 'Modifications enregistrées'
-                    : 'Animal ajouté avec succès 🎉',
-              );
-            },
-            child: Text(_isEdit ? 'Enregistrer' : 'Ajouter l\'animal'),
-          ),
-        ],
-      ),
-    );
+  void initState() {
+    super.initState();
+    final p = widget.pet;
+    _selectedSpecies = p?.species ?? 'Chien';
+    _sex = p?.sex ?? 'Mâle';
+    _sterilized = p?.sterilized ?? false;
+    _photoPath = p?.photoPath;
+    _name = TextEditingController(text: p?.name ?? '');
+    _breed = TextEditingController(text: p?.breed ?? '');
+    _birth = TextEditingController(text: p?.birthDate ?? '');
+    _weight = TextEditingController(text: p?.weight.toString() ?? '');
+    _chip = TextEditingController(text: p?.chip ?? '');
   }
-}
 
-class _SexOption extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-  final bool selected;
-  final VoidCallback onTap;
+  @override
+  void dispose() {
+    _name.dispose();
+    _breed.dispose();
+    _birth.dispose();
+    _weight.dispose();
+    _chip.dispose();
+    super.dispose();
+  }
 
-  const _SexOption({
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.selected,
-    required this.onTap,
-  });
+  String get _emoji =>
+      _species.firstWhere((e) => e.$1 == _selectedSpecies).$2;
+
+  Color get _color => switch (_selectedSpecies) {
+        'Chien' => const Color(0xFFFFB74D),
+        'Chat' => const Color(0xFF9FA8DA),
+        'Lapin' => const Color(0xFFA5D6A7),
+        _ => AppColors.primaryLight,
+      };
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+    try {
+      final birth = _birth.text.trim();
+      final pet = Pet(
+        id: widget.pet?.id,
+        ownerId: Session.instance.userId!,
+        name: _name.text.trim(),
+        species: _selectedSpecies,
+        breed: _breed.text.trim(),
+        age: Pet.ageFromBirthDate(birth),
+        weight: double.tryParse(_weight.text.replaceAll(',', '.')) ?? 0,
+        sex: _sex,
+        emoji: _emoji,
+        color: _color,
+        birthDate: birth,
+        chip: _chip.text.trim().isEmpty ? '—' : _chip.text.trim(),
+        sterilized: _sterilized,
+        photoPath: _photoPath,
+      );
+      if (_isEdit) {
+        await _repo.update(pet);
+      } else {
+        await _repo.insert(pet);
+      }
+      if (!mounted) return;
+      Navigator.pop(context);
+      showSuccessSnack(
+          context, _isEdit ? 'Modifications enregistrées' : 'Animal ajouté');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          height: 56,
-          decoration: BoxDecoration(
-            color: selected ? color.withValues(alpha: 0.12) : Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: selected ? color : AppColors.border,
-              width: 1.5,
+    return Scaffold(
+      appBar: AppBar(
+          title: Text(_isEdit ? 'Modifier' : 'Ajouter un animal')),
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          children: [
+            Center(
+              child: GestureDetector(
+                onTap: () async {
+                  final f = await ImagePicker()
+                      .pickImage(source: ImageSource.gallery, imageQuality: 85);
+                  if (f != null) setState(() => _photoPath = f.path);
+                },
+                child: PetAvatar(
+                  Pet(
+                    ownerId: '',
+                    name: '',
+                    species: _selectedSpecies,
+                    breed: '',
+                    age: '',
+                    weight: 0,
+                    sex: _sex,
+                    emoji: _emoji,
+                    color: _color,
+                    birthDate: '',
+                    chip: '',
+                    sterilized: false,
+                    photoPath: _photoPath,
+                  ),
+                  size: 100,
+                ),
+              ),
             ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, color: color),
-              const SizedBox(width: 6),
-              Text(label,
-                  style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: selected ? color : AppColors.navy)),
-            ],
-          ),
+            const SizedBox(height: 8),
+            const Center(
+                child: Text('Ajouter une photo',
+                    style: TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700))),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final (name, emoji) in _species)
+                  ChoiceChip(
+                    label: Text('$emoji $name'),
+                    selected: _selectedSpecies == name,
+                    onSelected: (_) =>
+                        setState(() => _selectedSpecies = name),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            LabeledField(
+              label: 'Nom',
+              hint: 'Rocky',
+              controller: _name,
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Nom requis' : null,
+            ),
+            LabeledField(
+              label: 'Race',
+              hint: 'Golden Retriever',
+              controller: _breed,
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Race requise' : null,
+            ),
+            LabeledField(
+              label: 'Date de naissance',
+              hint: 'JJ/MM/AAAA',
+              controller: _birth,
+              readOnly: true,
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Date requise' : null,
+              onTap: () async {
+                final d = await showDatePicker(
+                  context: context,
+                  firstDate: DateTime(2000),
+                  lastDate: DateTime.now(),
+                  initialDate: DateTime.now()
+                      .subtract(const Duration(days: 365)),
+                );
+                if (d != null) {
+                  _birth.text =
+                      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+                  setState(() {});
+                }
+              },
+            ),
+            if (_birth.text.trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Âge calculé : ${Pet.ageFromBirthDate(_birth.text)}',
+                  style: const TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            LabeledField(
+              label: 'Poids (kg)',
+              hint: '28.5',
+              controller: _weight,
+              keyboardType: TextInputType.number,
+              validator: (v) =>
+                  double.tryParse((v ?? '').replaceAll(',', '.')) == null
+                      ? 'Poids invalide'
+                      : null,
+            ),
+            Row(
+              children: [
+                ChoiceChip(
+                  label: const Text('Mâle'),
+                  selected: _sex == 'Mâle',
+                  onSelected: (_) => setState(() => _sex = 'Mâle'),
+                ),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: const Text('Femelle'),
+                  selected: _sex == 'Femelle',
+                  onSelected: (_) => setState(() => _sex = 'Femelle'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            LabeledField(
+                label: 'Puce', hint: '250 …', controller: _chip),
+            SwitchListTile(
+              value: _sterilized,
+              onChanged: (v) => setState(() => _sterilized = v),
+              title: const Text('Stérilisé(e)'),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: _saving ? null : _save,
+              child: Text(_isEdit ? 'Enregistrer' : "Ajouter l'animal"),
+            ),
+          ],
         ),
       ),
     );

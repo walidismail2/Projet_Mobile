@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Course materials (séances, slides) — not part of the app
+*.ppt
+*.pptx
+*.pps
+*.ppsx
+backend.zip

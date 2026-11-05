@@ -1,6 +1,13 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
-import '../../data/mock_data.dart';
+import 'package:flutter/material.dart';
+import 'package:open_filex/open_filex.dart';
+
+import '../../data/app_refresh.dart';
+import '../../data/session.dart';
+import '../../models/models.dart';
+import '../../repositories/health_repository.dart';
+import '../../repositories/pet_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import 'add_health_record_screen.dart';
@@ -13,554 +20,571 @@ class HealthScreen extends StatefulWidget {
 }
 
 class _HealthScreenState extends State<HealthScreen> {
+  final _petsRepo = PetRepository();
+  final _healthRepo = HealthRepository();
+  List<Pet> _pets = [];
   int _pet = 0;
+  List<Vaccine> _vaccines = [];
+  List<Treatment> _treatments = [];
+  List<MedicalEvent> _events = [];
+  List<MedicalDocument> _docs = [];
+  bool _loading = true;
 
-  void _openAddSheet() {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Ajouter au dossier médical',
-                  style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 16),
-              for (final type in HealthRecordType.values)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: IconBadge(type.icon, type.color, size: 44),
-                  title: Text(type.label,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.navy)),
-                  subtitle: Text(type.description),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                      this.context,
-                      MaterialPageRoute(
-                          builder: (_) => AddHealthRecordScreen(type: type)),
-                    );
-                  },
-                ),
-            ],
-          ),
+  int get _vaccinesOk =>
+      _vaccines.where((v) => v.status == HealthStatus.upToDate).length;
+  int get _vaccinesAlert => _vaccines
+      .where((v) =>
+          v.status == HealthStatus.late || v.status == HealthStatus.soon)
+      .length;
+  int get _treatmentsActive =>
+      _treatments.where((t) => !t.isCompleted).length;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    AppRefresh.instance.addListener(_onDataChanged);
+  }
+
+  @override
+  void dispose() {
+    AppRefresh.instance.removeListener(_onDataChanged);
+    super.dispose();
+  }
+
+  void _onDataChanged() {
+    if (!mounted) return;
+    _load();
+  }
+
+  Future<void> _load() async {
+    final ownerId = Session.instance.userId;
+    if (ownerId == null) return;
+    final pets = await _petsRepo.getByOwner(ownerId);
+    if (!mounted) return;
+    setState(() {
+      _pets = pets;
+      if (_pet >= _pets.length) _pet = 0;
+      _loading = false;
+    });
+    await _loadHealth();
+  }
+
+  Future<void> _loadHealth() async {
+    if (_pets.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _vaccines = [];
+          _treatments = [];
+          _events = [];
+          _docs = [];
+        });
+      }
+      return;
+    }
+    final id = _pets[_pet].id!;
+    final v = await _healthRepo.getVaccines(id);
+    final t = await _healthRepo.getTreatments(id);
+    final e = await _healthRepo.getEvents(id);
+    final d = await _healthRepo.getDocuments(id);
+    if (mounted) {
+      setState(() {
+        _vaccines = v;
+        _treatments = t;
+        _events = e;
+        _docs = d;
+      });
+    }
+  }
+
+  Future<void> _openAdd(HealthRecordType type) async {
+    if (_pets.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Ajoutez d’abord un animal')),
+      );
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddHealthRecordScreen(
+          type: type,
+          initialPetId: _pets[_pet].id,
         ),
       ),
     );
+    await _loadHealth();
+  }
+
+  Color _statusColor(HealthStatus s) => switch (s) {
+        HealthStatus.upToDate => AppColors.health,
+        HealthStatus.soon => AppColors.food,
+        HealthStatus.late => AppColors.reminder,
+      };
+
+  Future<void> _confirmDelete(String label, Future<void> Function() action) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer'),
+        content: Text('Supprimer « $label » ?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Supprimer')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await action();
+      await _loadHealth();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final pet = MockData.pets[_pet];
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     return DefaultTabController(
-      length: 5,
+      length: 4,
       child: Scaffold(
         floatingActionButton: FloatingActionButton(
-          onPressed: _openAddSheet,
-          child: const Icon(Icons.add_rounded),
-        ),
-        body: SafeArea(
-          child: NestedScrollView(
-            headerSliverBuilder: (context, _) => [
-              SliverToBoxAdapter(
+          heroTag: 'fab_health',
+          onPressed: () {
+            showModalBottomSheet(
+              context: context,
+              builder: (ctx) => SafeArea(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                      child: Text('Santé',
-                          style: Theme.of(context).textTheme.headlineMedium),
-                    ),
-                    PetSelector(
-                      selected: _pet,
-                      onChanged: (i) => setState(() => _pet = i),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: _HealthSummary(pet: pet),
-                    ),
+                    for (final type in HealthRecordType.values)
+                      ListTile(
+                        leading: IconBadge(type.icon, type.color),
+                        title: Text(type.label),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _openAdd(type);
+                        },
+                      ),
                   ],
                 ),
               ),
-              const SliverPersistentHeader(
-                pinned: true,
-                delegate: PinnedTabBarDelegate(
-                  TabBar(
-                    isScrollable: true,
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                    tabs: [
-                      Tab(text: 'Vaccins'),
-                      Tab(text: 'Traitements'),
-                      Tab(text: 'Historique'),
-                      Tab(text: 'Allergies & infos'),
-                      Tab(text: 'Documents'),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            body: const TabBarView(
-              children: [
-                _VaccinesTab(),
-                _TreatmentsTab(),
-                _HistoryTab(),
-                _AllergiesTab(),
-                _DocumentsTab(),
-              ],
-            ),
-          ),
+            );
+          },
+          child: const Icon(Icons.add),
         ),
-      ),
-    );
-  }
-}
-
-class _HealthSummary extends StatelessWidget {
-  final Pet pet;
-
-  const _HealthSummary({required this.pet});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF3FD19A), AppColors.health],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 70,
-            height: 70,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                CircularProgressIndicator(
-                  value: 0.75,
-                  strokeWidth: 7,
-                  backgroundColor: Colors.white.withValues(alpha: 0.3),
-                  valueColor: const AlwaysStoppedAnimation(Colors.white),
-                  constraints:
-                      const BoxConstraints.tightFor(width: 70, height: 70),
-                ),
-                const Text('75%',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16)),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Carnet de santé de ${pet.name}',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16)),
-                const SizedBox(height: 4),
-                Text('3 vaccins sur 4 à jour',
-                    style:
-                        TextStyle(color: Colors.white.withValues(alpha: 0.9))),
-                const SizedBox(height: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.22),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text('Prochain rappel : 10/10/2026',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700)),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _VaccinesTab extends StatelessWidget {
-  const _VaccinesTab();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-      children: [
-        for (final v in MockData.vaccines)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: AppCard(
-              child: Row(
-                children: [
-                  const IconBadge(Icons.vaccines_rounded, AppColors.health),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(v.name,
-                            style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: 4),
-                        Text('Fait le ${v.date} · ${v.vet}',
-                            style: Theme.of(context).textTheme.bodyMedium),
-                        const SizedBox(height: 2),
-                        Text('Rappel : ${v.nextDate}',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.navy)),
-                      ],
-                    ),
-                  ),
-                  switch (v.status) {
-                    HealthStatus.upToDate =>
-                      const StatusPill('À jour', AppColors.health),
-                    HealthStatus.soon =>
-                      const StatusPill('Bientôt', AppColors.food),
-                    HealthStatus.late =>
-                      const StatusPill('En retard', AppColors.reminder),
-                  },
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _TreatmentsTab extends StatelessWidget {
-  const _TreatmentsTab();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-      children: [
-        for (final t in MockData.treatments)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: AppCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      IconBadge(t.icon, AppColors.purple),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(t.name,
-                                style:
-                                    Theme.of(context).textTheme.titleMedium),
-                            Text('${t.dosage} · ${t.frequency}',
-                                style: Theme.of(context).textTheme.bodyMedium),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: LinearProgressIndicator(
-                            value: t.currentDay / t.totalDays,
-                            minHeight: 8,
-                            backgroundColor:
-                                AppColors.purple.withValues(alpha: 0.12),
-                            valueColor:
-                                const AlwaysStoppedAnimation(AppColors.purple),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        t.currentDay == t.totalDays
-                            ? 'Terminé'
-                            : 'Jour ${t.currentDay}/${t.totalDays}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.purple),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _HistoryTab extends StatelessWidget {
-  const _HistoryTab();
-
-  @override
-  Widget build(BuildContext context) {
-    final events = MockData.medicalHistory;
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-      itemCount: events.length,
-      itemBuilder: (context, i) {
-        final e = events[i];
-        return IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: e.color,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(e.icon, color: Colors.white, size: 20),
-                  ),
-                  if (i != events.length - 1)
-                    Expanded(
-                      child: Container(width: 2, color: AppColors.border),
-                    ),
-                ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text('Santé',
+                    style: Theme.of(context).textTheme.headlineMedium),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: AppCard(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(e.date,
-                            style: TextStyle(
-                                color: e.color,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 4),
-                        Text(e.title,
-                            style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: 4),
-                        Text(e.description,
-                            style: Theme.of(context).textTheme.bodyMedium),
-                      ],
+              if (_pets.isEmpty)
+                const Expanded(
+                  child: Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        'Ajoutez un animal pour suivre vaccins, traitements et documents.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.textSecondary),
+                      ),
                     ),
+                  ),
+                )
+              else ...[
+                PetSelector(
+                  pets: _pets,
+                  selected: _pet,
+                  onChanged: (i) async {
+                    setState(() => _pet = i);
+                    await _loadHealth();
+                  },
+                ),
+                _SummaryBar(
+                  vaccinesOk: _vaccinesOk,
+                  vaccinesAlert: _vaccinesAlert,
+                  treatmentsActive: _treatmentsActive,
+                  totalVaccines: _vaccines.length,
+                ),
+                const TabBar(
+                  isScrollable: true,
+                  tabs: [
+                    Tab(text: 'Vaccins'),
+                    Tab(text: 'Traitements'),
+                    Tab(text: 'Historique'),
+                    Tab(text: 'Documents'),
+                  ],
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _list(
+                        empty: 'Aucun vaccin enregistré',
+                        children: _vaccines.map(_vaccineCard),
+                      ),
+                      _list(
+                        empty: 'Aucun traitement en cours',
+                        children: _treatments.map(_treatmentCard),
+                      ),
+                      _list(
+                        empty: 'Aucune consultation',
+                        children: _events.map(_eventCard),
+                      ),
+                      _list(
+                        empty: 'Aucun document',
+                        children: _docs.map(_docCard),
+                      ),
+                    ],
                   ),
                 ),
-              ),
+              ],
             ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
-}
 
-class _AllergiesTab extends StatelessWidget {
-  const _AllergiesTab();
+  Widget _vaccineCard(Vaccine v) {
+    final days = () {
+      final next = parseFrDate(v.nextDate);
+      if (next == null) return null;
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      return next.difference(today).inDays;
+    }();
+    final detail = days == null
+        ? 'Rappel : ${v.nextDate}'
+        : days < 0
+            ? 'En retard de ${-days} j'
+            : days == 0
+                ? 'Rappel aujourd’hui'
+                : 'Rappel dans $days j';
 
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-      children: [
-        const SectionHeader('Allergies'),
-        const Wrap(
-          spacing: 10,
-          runSpacing: 10,
+    return AppCard(
+      child: ListTile(
+        leading: const IconBadge(Icons.vaccines, AppColors.health),
+        title: Text(v.name),
+        subtitle: Text(
+          '${v.date} → ${v.nextDate}\n${v.vet}\n$detail',
+        ),
+        isThreeLine: true,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            _AllergyChip('Poulet', 'Sévère', AppColors.reminder),
-            _AllergyChip('Pollen', 'Modérée', AppColors.food),
-            _AllergyChip('Pénicilline', 'Sévère', AppColors.reminder),
-            _AllergyChip('Acariens', 'Légère', AppColors.health),
+            StatusPill(v.status.label, _statusColor(v.status)),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20),
+              onPressed: () => _confirmDelete(
+                v.name,
+                () => _healthRepo.deleteVaccine(v.id!),
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 24),
-        const SectionHeader('Informations importantes'),
-        AppCard(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          child: const Column(
-            children: [
-              InfoRow(Icons.bloodtype_rounded, 'Groupe sanguin', 'DEA 1.1+'),
-              Divider(height: 1),
-              InfoRow(Icons.monitor_heart_rounded, 'Maladie chronique',
-                  'Dysplasie légère'),
-              Divider(height: 1),
-              InfoRow(Icons.no_food_rounded, 'Régime spécial',
-                  'Hypoallergénique'),
-              Divider(height: 1),
-              InfoRow(Icons.local_hospital_rounded, 'Vétérinaire référent',
-                  'Dr. Martin'),
+      ),
+    );
+  }
+
+  Widget _treatmentCard(Treatment t) {
+    return AppCard(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                IconBadge(t.icon, AppColors.purple),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(t.name,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Text('${t.dosage} · ${t.frequency}',
+                          style: const TextStyle(
+                              color: AppColors.textSecondary, fontSize: 13)),
+                    ],
+                  ),
+                ),
+                StatusPill(
+                  t.isCompleted ? 'Terminé' : 'Jour ${t.currentDay}/${t.totalDays}',
+                  t.isCompleted ? AppColors.health : AppColors.purple,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  onPressed: () => _confirmDelete(
+                    t.name,
+                    () => _healthRepo.deleteTreatment(t.id!),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: t.progress,
+                minHeight: 8,
+                backgroundColor: AppColors.border,
+                color: t.isCompleted ? AppColors.health : AppColors.purple,
+              ),
+            ),
+            if (!t.isCompleted) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () async {
+                    await _healthRepo.advanceTreatmentDay(t);
+                    await _loadHealth();
+                  },
+                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                  label: const Text('Jour pris'),
+                ),
+              ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _eventCard(MedicalEvent e) {
+    return AppCard(
+      child: ListTile(
+        leading: IconBadge(e.icon, e.color),
+        title: Text(e.title),
+        subtitle: Text(
+          e.description.trim().isEmpty
+              ? e.date
+              : '${e.date}\n${e.description}',
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.delete_outline, size: 20),
+          onPressed: () => _confirmDelete(
+            e.title,
+            () => _healthRepo.deleteEvent(e.id!),
           ),
         ),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.reminder.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-                color: AppColors.reminder.withValues(alpha: 0.3)),
-          ),
-          child: const Row(
+      ),
+    );
+  }
+
+  Future<void> _openDocument(MedicalDocument d) async {
+    final path = d.filePath;
+    if (path == null || path.isEmpty || !File(path).existsSync()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Fichier introuvable')),
+      );
+      return;
+    }
+    if (!d.isPdf) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.warning_amber_rounded,
-                  color: AppColors.reminder, size: 30),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Ne jamais administrer de pénicilline. Réaction allergique grave constatée en 2025.',
-                  style: TextStyle(color: AppColors.navy, height: 1.4),
+              AppBar(
+                title: Text(d.name, overflow: TextOverflow.ellipsis),
+                automaticallyImplyLeading: false,
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.open_in_new),
+                    onPressed: () {
+                      OpenFilex.open(path);
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+                ),
+                child: InteractiveViewer(
+                  child: Image.file(File(path), fit: BoxFit.contain),
                 ),
               ),
             ],
           ),
         ),
+      );
+      return;
+    }
+    final result = await OpenFilex.open(path);
+    if (!mounted) return;
+    if (result.type != ResultType.done) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.message)),
+      );
+    }
+  }
+
+  Widget _docCard(MedicalDocument d) {
+    final hasFile =
+        d.filePath != null && File(d.filePath!).existsSync();
+    return AppCard(
+      onTap: hasFile ? () => _openDocument(d) : null,
+      child: ListTile(
+        leading: !d.isPdf && hasFile
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.file(
+                  File(d.filePath!),
+                  width: 44,
+                  height: 44,
+                  fit: BoxFit.cover,
+                ),
+              )
+            : IconBadge(
+                d.isPdf ? Icons.picture_as_pdf : Icons.image,
+                AppColors.food,
+              ),
+        title: Text(d.name),
+        subtitle: Text(
+          '${d.date} · ${d.isPdf ? 'PDF' : 'Image'}'
+          '${d.size == '—' || d.size.isEmpty ? '' : ' · ${d.size}'}'
+          '${hasFile ? '' : ' · fichier manquant'}',
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasFile)
+              IconButton(
+                tooltip: 'Ouvrir',
+                icon: const Icon(Icons.open_in_new, size: 20),
+                onPressed: () => _openDocument(d),
+              ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20),
+              onPressed: () => _confirmDelete(
+                d.name,
+                () => _healthRepo.deleteDocument(d.id!),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _list({
+    required String empty,
+    required Iterable<Widget> children,
+  }) {
+    final items = children.toList();
+    if (items.isEmpty) {
+      return Center(
+        child: Text(empty,
+            style: const TextStyle(color: AppColors.textSecondary)),
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        for (final c in items) ...[c, const SizedBox(height: 10)],
       ],
     );
   }
 }
 
-class _AllergyChip extends StatelessWidget {
-  final String name;
-  final String severity;
-  final Color color;
+class _SummaryBar extends StatelessWidget {
+  final int vaccinesOk;
+  final int vaccinesAlert;
+  final int treatmentsActive;
+  final int totalVaccines;
 
-  const _AllergyChip(this.name, this.severity, this.color);
+  const _SummaryBar({
+    required this.vaccinesOk,
+    required this.vaccinesAlert,
+    required this.treatmentsActive,
+    required this.totalVaccines,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          Expanded(
+            child: _chip(
+              Icons.vaccines_rounded,
+              AppColors.health,
+              totalVaccines == 0
+                  ? 'Aucun vaccin'
+                  : '$vaccinesOk / $totalVaccines à jour',
+            ),
           ),
           const SizedBox(width: 8),
-          Text(name,
-              style: const TextStyle(
-                  fontWeight: FontWeight.w700, color: AppColors.navy)),
-          const SizedBox(width: 6),
-          Text(severity, style: TextStyle(color: color, fontSize: 12)),
+          Expanded(
+            child: _chip(
+              Icons.warning_amber_rounded,
+              vaccinesAlert > 0 ? AppColors.reminder : AppColors.health,
+              vaccinesAlert == 0
+                  ? 'Rien en retard'
+                  : '$vaccinesAlert à surveiller',
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _chip(
+              Icons.medication_rounded,
+              AppColors.purple,
+              treatmentsActive == 0
+                  ? 'Pas de traitement'
+                  : '$treatmentsActive en cours',
+            ),
+          ),
         ],
       ),
     );
   }
-}
 
-class _DocumentsTab extends StatelessWidget {
-  const _DocumentsTab();
-
-  @override
-  Widget build(BuildContext context) {
-    return GridView.count(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-      crossAxisCount: 2,
-      mainAxisSpacing: 14,
-      crossAxisSpacing: 14,
-      childAspectRatio: 0.95,
-      children: [
-        GestureDetector(
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) =>
-                  const AddHealthRecordScreen(type: HealthRecordType.document),
+  Widget _chip(IconData icon, Color color, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
             ),
           ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppColors.primaryLight.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.primary, width: 1.5),
-            ),
-            child: const Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.cloud_upload_rounded,
-                    color: AppColors.primary, size: 40),
-                SizedBox(height: 8),
-                Text('Importer un\ndocument',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w700)),
-              ],
-            ),
-          ),
-        ),
-        for (final d in MockData.documents)
-          AppCard(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Container(
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: (d.isPdf ? AppColors.reminder : AppColors.vet)
-                          .withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(
-                      d.isPdf
-                          ? Icons.picture_as_pdf_rounded
-                          : Icons.image_rounded,
-                      size: 40,
-                      color: d.isPdf ? AppColors.reminder : AppColors.vet,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(d.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700, color: AppColors.navy)),
-                Text('${d.date} · ${d.size}',
-                    style: const TextStyle(
-                        fontSize: 12, color: AppColors.textSecondary)),
-              ],
-            ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }

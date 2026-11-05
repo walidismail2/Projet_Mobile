@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/mock_data.dart';
+import '../../data/session.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import 'custom_reminder_screen.dart';
@@ -9,250 +9,164 @@ class ReminderSettingsScreen extends StatefulWidget {
   const ReminderSettingsScreen({super.key});
 
   @override
-  State<ReminderSettingsScreen> createState() => _ReminderSettingsScreenState();
+  State<ReminderSettingsScreen> createState() =>
+      _ReminderSettingsScreenState();
 }
 
 class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
-  bool _all = true;
-  final Map<NotificationType, bool> _enabled = {
-    for (final t in NotificationType.values) t: true,
-  };
-  final Map<NotificationType, String> _timing = {
-    NotificationType.vaccine: '7 jours avant',
-    NotificationType.treatment: 'À l\'heure de la prise',
-    NotificationType.appointment: '24 h avant',
-    NotificationType.meal: 'À l\'heure du repas',
-    NotificationType.custom: 'Selon le rappel',
-  };
+  bool _master = true;
+  bool _vaccines = true;
+  bool _treatments = true;
+  bool _appointments = true;
+  bool _meals = true;
   bool _sound = true;
   bool _vibration = true;
-  bool _silentNight = false;
+  bool _silent = true;
+  bool _loading = true;
 
-  static const _timingOptions = {
-    NotificationType.vaccine: ['1 jour avant', '3 jours avant', '7 jours avant', '1 mois avant'],
-    NotificationType.treatment: ['À l\'heure de la prise', '15 min avant', '30 min avant'],
-    NotificationType.appointment: ['1 h avant', '3 h avant', '24 h avant', '48 h avant'],
-    NotificationType.meal: ['À l\'heure du repas', '10 min avant', '30 min avant'],
-  };
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
 
-  void _pickTiming(NotificationType type) {
-    final options = _timingOptions[type];
-    if (options == null) return;
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Rappel ${type.label.toLowerCase()}',
-                style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            for (final o in options)
-              ListTile(
-                title: Text(o,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, color: AppColors.navy)),
-                trailing: _timing[type] == o
-                    ? const Icon(Icons.check_circle_rounded,
-                        color: AppColors.primary)
-                    : null,
-                onTap: () {
-                  setState(() => _timing[type] = o);
-                  Navigator.pop(context);
-                },
-              ),
-            const SizedBox(height: 12),
-          ],
-        ),
-      ),
-    );
+  Future<void> _load() async {
+    final p = Session.instance.prefs;
+    _master = await p.getMasterNotifications();
+    _vaccines = await p.getReminderEnabled('vaccine');
+    _treatments = await p.getReminderEnabled('treatment');
+    _appointments = await p.getReminderEnabled('appointment');
+    _meals = await p.getReminderEnabled('meal');
+    _sound = await p.getBool('sound');
+    _vibration = await p.getBool('vibration');
+    _silent = await p.getBool('silent_night');
+    if (mounted) setState(() => _loading = false);
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final p = Session.instance.prefs;
     return Scaffold(
-      appBar: AppBar(title: const Text('Rappels & notifications')),
+      appBar: AppBar(title: const Text('Rappels')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+        padding: const EdgeInsets.all(20),
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                  colors: [Color(0xFFFF7A8F), AppColors.reminder]),
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.notifications_active_rounded,
-                    color: Colors.white, size: 36),
-                const SizedBox(width: 14),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Notifications',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800)),
-                      Text('Activer tous les rappels',
-                          style: TextStyle(color: Colors.white70)),
-                    ],
-                  ),
-                ),
-                Switch(
-                  value: _all,
-                  trackColor: WidgetStateProperty.resolveWith((s) =>
-                      s.contains(WidgetState.selected)
-                          ? Colors.white.withValues(alpha: 0.45)
-                          : Colors.white24),
-                  onChanged: (v) => setState(() => _all = v),
-                ),
-              ],
+          AppCard(
+            color: AppColors.reminder,
+            child: SwitchListTile(
+              value: _master,
+              onChanged: (v) async {
+                setState(() => _master = v);
+                await p.setMasterNotifications(v);
+              },
+              title: const Text('Notifications activées',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w800)),
+              subtitle: const Text('Préférences locales',
+                  style: TextStyle(color: Colors.white70)),
+              activeThumbColor: Colors.white,
+              activeTrackColor: Colors.white54,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
           const SectionHeader('Types de rappels'),
           AppCard(
-            padding: const EdgeInsets.symmetric(vertical: 4),
             child: Column(
               children: [
-                for (final t in NotificationType.values)
-                  ListTile(
-                    onTap: () => _pickTiming(t),
-                    leading: IconBadge(t.icon, t.color, size: 42),
-                    title: Text('Rappel ${t.label.toLowerCase()}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.navy)),
-                    subtitle: Text(_timing[t]!),
-                    trailing: Switch(
-                      value: _all && _enabled[t]!,
-                      onChanged: _all
-                          ? (v) => setState(() => _enabled[t] = v)
-                          : null,
-                    ),
-                  ),
+                SwitchListTile(
+                  value: _vaccines && _master,
+                  onChanged: !_master
+                      ? null
+                      : (v) async {
+                          setState(() => _vaccines = v);
+                          await p.setReminderEnabled('vaccine', v);
+                        },
+                  secondary:
+                      const IconBadge(Icons.vaccines, AppColors.health),
+                  title: const Text('Vaccins'),
+                ),
+                SwitchListTile(
+                  value: _treatments && _master,
+                  onChanged: !_master
+                      ? null
+                      : (v) async {
+                          setState(() => _treatments = v);
+                          await p.setReminderEnabled('treatment', v);
+                        },
+                  secondary:
+                      const IconBadge(Icons.medication, AppColors.purple),
+                  title: const Text('Traitements'),
+                ),
+                SwitchListTile(
+                  value: _appointments && _master,
+                  onChanged: !_master
+                      ? null
+                      : (v) async {
+                          setState(() => _appointments = v);
+                          await p.setReminderEnabled('appointment', v);
+                        },
+                  secondary: const IconBadge(Icons.event, AppColors.vet),
+                  title: const Text('Rendez-vous'),
+                ),
+                SwitchListTile(
+                  value: _meals && _master,
+                  onChanged: !_master
+                      ? null
+                      : (v) async {
+                          setState(() => _meals = v);
+                          await p.setReminderEnabled('meal', v);
+                        },
+                  secondary:
+                      const IconBadge(Icons.restaurant, AppColors.food),
+                  title: const Text('Repas'),
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-          SectionHeader(
-            'Rappels personnalisés',
-            action: '+ Créer',
-            onAction: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CustomReminderScreen()),
-            ),
-          ),
-          const _CustomReminderTile(
-            emoji: '✨',
-            title: 'Brossage de Luna',
-            subtitle: 'Chaque samedi · 10:00',
-          ),
-          const _CustomReminderTile(
-            emoji: '🛁',
-            title: 'Bain de Rocky',
-            subtitle: 'Tous les mois · le 1er · 18:00',
-          ),
-          const _CustomReminderTile(
-            emoji: '🥕',
-            title: 'Acheter du foin pour Coco',
-            subtitle: 'Toutes les 2 semaines · 09:00',
-          ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
           const SectionHeader('Préférences'),
           AppCard(
-            padding: const EdgeInsets.symmetric(vertical: 4),
             child: Column(
               children: [
                 SwitchListTile(
                   value: _sound,
-                  onChanged: (v) => setState(() => _sound = v),
-                  secondary: const Icon(Icons.volume_up_rounded,
-                      color: AppColors.textSecondary),
-                  title: const Text('Son',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w600, color: AppColors.navy)),
+                  onChanged: (v) async {
+                    setState(() => _sound = v);
+                    await p.setBool('sound', v);
+                  },
+                  title: const Text('Son'),
                 ),
                 SwitchListTile(
                   value: _vibration,
-                  onChanged: (v) => setState(() => _vibration = v),
-                  secondary: const Icon(Icons.vibration_rounded,
-                      color: AppColors.textSecondary),
-                  title: const Text('Vibration',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w600, color: AppColors.navy)),
+                  onChanged: (v) async {
+                    setState(() => _vibration = v);
+                    await p.setBool('vibration', v);
+                  },
+                  title: const Text('Vibration'),
                 ),
                 SwitchListTile(
-                  value: _silentNight,
-                  onChanged: (v) => setState(() => _silentNight = v),
-                  secondary: const Icon(Icons.bedtime_rounded,
-                      color: AppColors.textSecondary),
-                  title: const Text('Mode silencieux la nuit',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w600, color: AppColors.navy)),
-                  subtitle: const Text('22:00 – 07:00'),
+                  value: _silent,
+                  onChanged: (v) async {
+                    setState(() => _silent = v);
+                    await p.setBool('silent_night', v);
+                  },
+                  title: const Text('Heures calmes 22h–7h'),
                 ),
               ],
             ),
           ),
+          const SizedBox(height: 16),
+          SectionHeader('Rappels personnalisés',
+              action: '+ Créer',
+              onAction: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const CustomReminderScreen()),
+                  )),
         ],
-      ),
-    );
-  }
-}
-
-class _CustomReminderTile extends StatelessWidget {
-  final String emoji;
-  final String title;
-  final String subtitle;
-
-  const _CustomReminderTile({
-    required this.emoji,
-    required this.title,
-    required this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: AppCard(
-        padding: const EdgeInsets.all(14),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const CustomReminderScreen()),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AppColors.reminder.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Text(emoji, style: const TextStyle(fontSize: 22)),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, color: AppColors.navy)),
-                  Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right_rounded,
-                color: AppColors.textSecondary),
-          ],
-        ),
       ),
     );
   }

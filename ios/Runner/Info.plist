@@ -4,6 +4,12 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>PetCare a besoin d’accéder à vos photos pour joindre des documents médicaux.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>PetCare a besoin de la caméra pour photographier un document médical.</string>
+	<key>NSDocumentPickerUsageDescription</key>
+	<string>PetCare a besoin d’accéder à vos fichiers pour joindre un PDF médical.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

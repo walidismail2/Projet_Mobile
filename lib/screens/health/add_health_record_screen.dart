@@ -1,281 +1,637 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
+
+import '../../data/document_storage.dart';
+import '../../data/session.dart';
+import '../../models/models.dart';
+import '../../repositories/health_repository.dart';
+import '../../repositories/pet_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 
 enum HealthRecordType {
-  vaccine('Vaccin', 'Enregistrer une vaccination', Icons.vaccines_rounded,
-      AppColors.health),
-  treatment('Traitement', 'Médicament, vermifuge, anti-puces…',
-      Icons.medication_rounded, AppColors.purple),
-  consultation('Consultation', 'Visite, examen, intervention',
-      Icons.monitor_heart_rounded, AppColors.vet),
-  allergy('Allergie', 'Allergie ou information importante',
-      Icons.warning_amber_rounded, AppColors.reminder),
-  document('Document', 'Ordonnance, radio, analyse…',
-      Icons.description_rounded, AppColors.food);
+  vaccine('Vaccin', Icons.vaccines_rounded, AppColors.health),
+  treatment('Traitement', Icons.medication_rounded, AppColors.purple),
+  consultation('Consultation', Icons.monitor_heart_rounded, AppColors.vet),
+  document('Document', Icons.description_rounded, AppColors.food);
 
   final String label;
-  final String description;
   final IconData icon;
   final Color color;
-
-  const HealthRecordType(this.label, this.description, this.icon, this.color);
+  const HealthRecordType(this.label, this.icon, this.color);
 }
+
+const _frequencies = [
+  '1 fois / jour',
+  '2 fois / jour',
+  '3 fois / jour',
+  'Tous les 2 jours',
+  '1 fois / semaine',
+  'Selon besoin',
+];
 
 class AddHealthRecordScreen extends StatefulWidget {
   final HealthRecordType type;
+  final int? initialPetId;
 
-  const AddHealthRecordScreen({super.key, required this.type});
+  const AddHealthRecordScreen({
+    super.key,
+    required this.type,
+    this.initialPetId,
+  });
 
   @override
   State<AddHealthRecordScreen> createState() => _AddHealthRecordScreenState();
 }
 
 class _AddHealthRecordScreenState extends State<AddHealthRecordScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _title = TextEditingController();
+  final _date = TextEditingController();
+  final _nextDate = TextEditingController();
+  final _vet = TextEditingController();
+  final _dosage = TextEditingController();
+  final _notes = TextEditingController();
+  final _days = TextEditingController(text: '7');
+  final _health = HealthRepository();
+
+  List<Pet> _pets = [];
   int _pet = 0;
-  bool _reminder = true;
-  String _severity = 'Modérée';
+  String _frequency = _frequencies.first;
+  bool _isPdf = true;
+  String? _pickedPath;
+  String? _pickedName;
+  String? _pickedSize;
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final today = formatFrDate(DateTime.now());
+    _date.text = today;
+    _load();
+  }
+
+  Future<void> _load() async {
+    final pets = await PetRepository().getByOwner(Session.instance.userId!);
+    if (!mounted) return;
+    var index = 0;
+    if (widget.initialPetId != null && pets.isNotEmpty) {
+      final i = pets.indexWhere((p) => p.id == widget.initialPetId);
+      if (i >= 0) index = i;
+    }
+    setState(() {
+      _pets = pets;
+      _pet = index;
+      _loading = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _date.dispose();
+    _nextDate.dispose();
+    _vet.dispose();
+    _dosage.dispose();
+    _notes.dispose();
+    _days.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate(TextEditingController ctrl, {DateTime? min}) async {
+    final parsed = parseFrDate(ctrl.text);
+    final d = await showDatePicker(
+      context: context,
+      firstDate: min ?? DateTime(2015),
+      lastDate: DateTime(2040),
+      initialDate: parsed ?? DateTime.now(),
+    );
+    if (d != null) {
+      ctrl.text = formatFrDate(d);
+      setState(() {});
+    }
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate() || _pets.isEmpty || _saving) return;
+    setState(() => _saving = true);
+    final petId = _pets[_pet].id!;
+    final type = widget.type;
+    try {
+      switch (type) {
+        case HealthRecordType.vaccine:
+          final next = _nextDate.text.trim();
+          await _health.insertVaccine(Vaccine(
+            petId: petId,
+            name: _title.text.trim(),
+            date: _date.text.trim(),
+            nextDate: next,
+            vet: _vet.text.trim().isEmpty ? '—' : _vet.text.trim(),
+            status: healthStatusFromNextDate(next),
+          ));
+        case HealthRecordType.treatment:
+          final total = int.tryParse(_days.text.trim()) ?? 7;
+          await _health.insertTreatment(Treatment(
+            petId: petId,
+            name: _title.text.trim(),
+            dosage:
+                _dosage.text.trim().isEmpty ? '—' : _dosage.text.trim(),
+            frequency: _frequency,
+            currentDay: 0,
+            totalDays: total.clamp(1, 365),
+            icon: Icons.medication_rounded,
+          ));
+        case HealthRecordType.consultation:
+          await _health.insertEvent(MedicalEvent(
+            petId: petId,
+            title: _title.text.trim(),
+            date: _date.text.trim(),
+            description: _notes.text.trim(),
+            icon: Icons.monitor_heart_rounded,
+            color: AppColors.vet,
+          ));
+        case HealthRecordType.document:
+          if (_pickedPath == null) {
+            if (!mounted) return;
+            setState(() => _saving = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Choisissez un fichier')),
+            );
+            return;
+          }
+          final saved = await DocumentStorage.saveLocal(
+            _pickedPath!,
+            isPdf: _isPdf,
+          );
+          await _health.insertDocument(MedicalDocument(
+            petId: petId,
+            name: _title.text.trim(),
+            date: _date.text.trim(),
+            size: saved.sizeLabel,
+            isPdf: _isPdf,
+            filePath: saved.path,
+          ));
+      }
+      if (!mounted) return;
+      Navigator.pop(context, true);
+      showSuccessSnack(context, '${type.label} enregistré');
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Impossible d’enregistrer')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final type = widget.type;
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_pets.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: Text('Ajouter : ${widget.type.label}')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Ajoutez d’abord un animal pour enregistrer un suivi santé.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
-      appBar: AppBar(title: Text('Ajouter : ${type.label.toLowerCase()}')),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                IconBadge(type.icon, type.color, size: 56),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(type.label,
-                          style: Theme.of(context).textTheme.titleLarge),
-                      Text(type.description,
-                          style: Theme.of(context).textTheme.bodyMedium),
-                    ],
-                  ),
-                ),
-              ],
+      appBar: AppBar(title: Text('Ajouter : ${widget.type.label}')),
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          children: [
+            PetSelector(
+              pets: _pets,
+              selected: _pet,
+              onChanged: (i) => setState(() => _pet = i),
             ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 24, 20, 10),
-            child: Text('Pour quel animal ?',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600, color: AppColors.navy)),
-          ),
-          PetSelector(
-              selected: _pet, onChanged: (i) => setState(() => _pet = i)),
-          const SizedBox(height: 20),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                ..._fieldsFor(type),
-                if (type == HealthRecordType.vaccine ||
-                    type == HealthRecordType.treatment)
-                  AppCard(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: _reminder,
-                      onChanged: (v) => setState(() => _reminder = v),
-                      secondary: const IconBadge(
-                          Icons.notifications_active_rounded,
-                          AppColors.reminder,
-                          size: 40),
-                      title: const Text('Activer le rappel',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.navy)),
-                      subtitle: Text(type == HealthRecordType.vaccine
-                          ? '7 jours avant la date de rappel'
-                          : 'À chaque prise'),
-                    ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ..._fieldsForType(),
+                  const SizedBox(height: 8),
+                  FilledButton(
+                    onPressed: _saving ? null : _save,
+                    child: _saving
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Enregistrer'),
                   ),
-                const SizedBox(height: 28),
-                FilledButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    showSuccessSnack(context, '${type.label} ajouté(e)');
-                  },
-                  child: const Text('Enregistrer'),
-                ),
-                const SizedBox(height: 24),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  LabeledField _dateField(String label) => LabeledField(
-        label: label,
-        hint: 'JJ/MM/AAAA',
-        icon: Icons.event_outlined,
-        readOnly: true,
-        onTap: () => showDatePicker(
-          context: context,
-          firstDate: DateTime(2015),
-          lastDate: DateTime(2035),
-          initialDate: DateTime.now(),
-        ),
-      );
-
-  List<Widget> _fieldsFor(HealthRecordType type) {
-    switch (type) {
+  List<Widget> _fieldsForType() {
+    switch (widget.type) {
       case HealthRecordType.vaccine:
         return [
-          const LabeledField(
-              label: 'Nom du vaccin',
-              hint: 'Ex : Rage, CHPPi…',
-              icon: Icons.vaccines_outlined),
-          Row(children: [
-            Expanded(child: _dateField('Date')),
-            const SizedBox(width: 12),
-            Expanded(child: _dateField('Prochain rappel')),
-          ]),
-          const LabeledField(
-              label: 'Vétérinaire',
-              hint: 'Ex : Dr. Martin',
-              icon: Icons.local_hospital_outlined),
-          const LabeledField(
-              label: 'N° de lot',
-              hint: 'Facultatif',
-              icon: Icons.qr_code_rounded),
+          LabeledField(
+            label: 'Nom du vaccin',
+            hint: 'Ex. Rage, CHPPi…',
+            controller: _title,
+            validator: _required,
+          ),
+          LabeledField(
+            label: 'Date d’injection',
+            hint: 'JJ/MM/AAAA',
+            controller: _date,
+            readOnly: true,
+            onTap: () => _pickDate(_date),
+            validator: _required,
+          ),
+          LabeledField(
+            label: 'Prochain rappel',
+            hint: 'JJ/MM/AAAA',
+            controller: _nextDate,
+            readOnly: true,
+            onTap: () {
+              final min = parseFrDate(_date.text) ?? DateTime.now();
+              _pickDate(_nextDate, min: min);
+            },
+            validator: (v) {
+              if (v == null || v.trim().isEmpty) return 'Rappel requis';
+              final next = parseFrDate(v);
+              if (next == null) return 'Date invalide';
+              final inj = parseFrDate(_date.text);
+              if (inj != null && next.isBefore(inj)) {
+                return 'Doit être après l’injection';
+              }
+              return null;
+            },
+          ),
+          LabeledField(
+            label: 'Vétérinaire',
+            hint: 'Dr. …',
+            controller: _vet,
+          ),
+          if (_nextDate.text.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: StatusPill(
+                healthStatusFromNextDate(_nextDate.text).label,
+                _statusColor(healthStatusFromNextDate(_nextDate.text)),
+              ),
+            ),
         ];
       case HealthRecordType.treatment:
         return [
-          const LabeledField(
-              label: 'Médicament',
-              hint: 'Ex : Clavubactin',
-              icon: Icons.medication_outlined),
-          const Row(children: [
-            Expanded(
-                child: LabeledField(
-                    label: 'Dosage', hint: 'Ex : 250 mg', icon: Icons.scale)),
-            SizedBox(width: 12),
-            Expanded(
-                child: LabeledField(
-                    label: 'Fréquence',
-                    hint: '2x / jour',
-                    icon: Icons.repeat_rounded)),
-          ]),
-          Row(children: [
-            Expanded(child: _dateField('Début')),
-            const SizedBox(width: 12),
-            Expanded(child: _dateField('Fin')),
-          ]),
-          const LabeledField(
-              label: 'Instructions',
-              hint: 'Ex : à donner pendant le repas',
-              maxLines: 3),
-        ];
-      case HealthRecordType.consultation:
-        return [
-          const LabeledField(
-              label: 'Motif',
-              hint: 'Ex : contrôle annuel',
-              icon: Icons.description_outlined),
-          _dateField('Date'),
-          const LabeledField(
-              label: 'Vétérinaire',
-              hint: 'Ex : Dr. Martin',
-              icon: Icons.local_hospital_outlined),
-          const LabeledField(
-              label: 'Diagnostic / compte rendu',
-              hint: 'Notes du vétérinaire…',
-              maxLines: 4),
-        ];
-      case HealthRecordType.allergy:
-        return [
-          const LabeledField(
-              label: 'Allergène',
-              hint: 'Ex : poulet, pollen…',
-              icon: Icons.warning_amber_rounded),
-          const Text('Sévérité',
-              style: TextStyle(
-                  fontWeight: FontWeight.w600, color: AppColors.navy)),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 10,
-            children: [
-              for (final s in ['Légère', 'Modérée', 'Sévère'])
-                ChoiceChip(
-                  label: Text(s),
-                  selected: _severity == s,
-                  onSelected: (_) => setState(() => _severity = s),
-                ),
-            ],
+          LabeledField(
+            label: 'Médicament / traitement',
+            hint: 'Ex. Antibiotique…',
+            controller: _title,
+            validator: _required,
           ),
-          const SizedBox(height: 16),
-          const LabeledField(
-              label: 'Symptômes / réaction',
-              hint: 'Ex : démangeaisons, vomissements…',
-              maxLines: 3),
-        ];
-      case HealthRecordType.document:
-        return [
-          Container(
-            height: 160,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.primary, width: 1.5),
-            ),
-            child: const Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+          LabeledField(
+            label: 'Dosage',
+            hint: 'Ex. 1 comprimé, 0,5 ml…',
+            controller: _dosage,
+            validator: _required,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.cloud_upload_rounded,
-                    size: 48, color: AppColors.primary),
-                SizedBox(height: 8),
-                Text('Touchez pour choisir un fichier',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w700, color: AppColors.navy)),
-                Text('PDF, JPG ou PNG · 10 Mo max',
-                    style: TextStyle(color: AppColors.textSecondary)),
+                const Text(
+                  'Fréquence',
+                  style: TextStyle(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  key: ValueKey(_frequency),
+                  initialValue: _frequency,
+                  items: [
+                    for (final f in _frequencies)
+                      DropdownMenuItem(value: f, child: Text(f)),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setState(() => _frequency = v);
+                  },
+                  decoration: const InputDecoration(hintText: 'Fréquence'),
+                ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(backgroundColor: Colors.white),
-                  onPressed: () {},
-                  icon: const Icon(Icons.photo_camera_outlined),
-                  label: const Text('Photo'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(backgroundColor: Colors.white),
-                  onPressed: () {},
-                  icon: const Icon(Icons.folder_open_outlined),
-                  label: const Text('Fichiers'),
-                ),
-              ),
-            ],
+          LabeledField(
+            label: 'Durée (jours)',
+            hint: '7',
+            controller: _days,
+            keyboardType: TextInputType.number,
+            validator: (v) {
+              final n = int.tryParse(v?.trim() ?? '');
+              if (n == null || n < 1) return 'Durée invalide';
+              if (n > 365) return 'Max. 365 jours';
+              return null;
+            },
           ),
-          const SizedBox(height: 20),
-          const LabeledField(
-              label: 'Nom du document',
-              hint: 'Ex : Radio hanche',
-              icon: Icons.description_outlined),
-          _dateField('Date du document'),
+          LabeledField(
+            label: 'Date de début',
+            hint: 'JJ/MM/AAAA',
+            controller: _date,
+            readOnly: true,
+            onTap: () => _pickDate(_date),
+            validator: _required,
+          ),
+          LabeledField(
+            label: 'Notes',
+            hint: 'Consignes, remarques…',
+            controller: _notes,
+            maxLines: 3,
+          ),
+        ];
+      case HealthRecordType.consultation:
+        return [
+          LabeledField(
+            label: 'Motif',
+            hint: 'Ex. Contrôle annuel…',
+            controller: _title,
+            validator: _required,
+          ),
+          LabeledField(
+            label: 'Date',
+            hint: 'JJ/MM/AAAA',
+            controller: _date,
+            readOnly: true,
+            onTap: () => _pickDate(_date),
+            validator: _required,
+          ),
+          LabeledField(
+            label: 'Compte rendu',
+            hint: 'Observations du vétérinaire…',
+            controller: _notes,
+            maxLines: 4,
+          ),
+        ];
+      case HealthRecordType.document:
+        return [
+          LabeledField(
+            label: 'Nom du document',
+            hint: 'Ex. Analyse sang…',
+            controller: _title,
+            validator: _required,
+          ),
+          LabeledField(
+            label: 'Date',
+            hint: 'JJ/MM/AAAA',
+            controller: _date,
+            readOnly: true,
+            onTap: () => _pickDate(_date),
+            validator: _required,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Type de fichier',
+                  style: TextStyle(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(
+                      value: true,
+                      label: Text('PDF'),
+                      icon: Icon(Icons.picture_as_pdf),
+                    ),
+                    ButtonSegment(
+                      value: false,
+                      label: Text('Image'),
+                      icon: Icon(Icons.image),
+                    ),
+                  ],
+                  selected: {_isPdf},
+                  onSelectionChanged: (s) {
+                    setState(() {
+                      _isPdf = s.first;
+                      _pickedPath = null;
+                      _pickedName = null;
+                      _pickedSize = null;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+          _FilePickerCard(
+            isPdf: _isPdf,
+            pickedName: _pickedName,
+            pickedSize: _pickedSize,
+            pickedPath: _pickedPath,
+            onPickPdf: _pickPdf,
+            onPickGallery: () => _pickImage(ImageSource.gallery),
+            onPickCamera: () => _pickImage(ImageSource.camera),
+            onClear: () => setState(() {
+              _pickedPath = null;
+              _pickedName = null;
+              _pickedSize = null;
+            }),
+          ),
         ];
     }
+  }
+
+  Future<void> _pickPdf() async {
+    final file = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+    );
+    final path = file?.path;
+    if (file == null || path == null) return;
+    final bytes = file.lengthSync() ?? await file.length() ?? 0;
+    setState(() {
+      _isPdf = true;
+      _pickedPath = path;
+      _pickedName = file.name;
+      _pickedSize = bytes > 0 ? DocumentStorage.formatBytes(bytes) : null;
+      if (_title.text.trim().isEmpty) {
+        _title.text = p.basenameWithoutExtension(file.name);
+      }
+    });
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    final x = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: 85,
+    );
+    if (x == null) return;
+    final bytes = await x.length();
+    setState(() {
+      _isPdf = false;
+      _pickedPath = x.path;
+      _pickedName = x.name;
+      _pickedSize = DocumentStorage.formatBytes(bytes);
+      if (_title.text.trim().isEmpty) {
+        _title.text = p.basenameWithoutExtension(x.name);
+      }
+    });
+  }
+
+  String? _required(String? v) =>
+      (v == null || v.trim().isEmpty) ? 'Requis' : null;
+
+  Color _statusColor(HealthStatus s) => switch (s) {
+        HealthStatus.upToDate => AppColors.health,
+        HealthStatus.soon => AppColors.food,
+        HealthStatus.late => AppColors.reminder,
+      };
+}
+
+class _FilePickerCard extends StatelessWidget {
+  final bool isPdf;
+  final String? pickedName;
+  final String? pickedSize;
+  final String? pickedPath;
+  final VoidCallback onPickPdf;
+  final VoidCallback onPickGallery;
+  final VoidCallback onPickCamera;
+  final VoidCallback onClear;
+
+  const _FilePickerCard({
+    required this.isPdf,
+    required this.pickedName,
+    required this.pickedSize,
+    required this.pickedPath,
+    required this.onPickPdf,
+    required this.onPickGallery,
+    required this.onPickCamera,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasFile = pickedPath != null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Fichier',
+              style: TextStyle(
+                color: AppColors.navy,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (hasFile) ...[
+              if (!isPdf && pickedPath != null && File(pickedPath!).existsSync())
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(
+                    File(pickedPath!),
+                    height: 140,
+                    fit: BoxFit.cover,
+                  ),
+                )
+              else
+                Row(
+                  children: [
+                    IconBadge(
+                      isPdf ? Icons.picture_as_pdf : Icons.image,
+                      AppColors.food,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            pickedName ?? 'Fichier',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          if (pickedSize != null)
+                            Text(
+                              pickedSize!,
+                              style: const TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: onClear,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(onPressed: onClear, child: const Text('Retirer')),
+              ),
+            ] else if (isPdf) ...[
+              OutlinedButton.icon(
+                onPressed: onPickPdf,
+                icon: const Icon(Icons.upload_file),
+                label: const Text('Choisir un PDF'),
+              ),
+            ] else ...[
+              OutlinedButton.icon(
+                onPressed: onPickGallery,
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const Text('Galerie'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: onPickCamera,
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: const Text('Appareil photo'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }

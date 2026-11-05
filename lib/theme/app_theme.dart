@@ -120,7 +120,6 @@ class AppTheme {
         indicatorColor: AppColors.primary,
         indicatorSize: TabBarIndicatorSize.label,
         dividerColor: Colors.transparent,
-        tabAlignment: TabAlignment.start,
         labelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
         unselectedLabelStyle:
             TextStyle(fontWeight: FontWeight.w600, fontSize: 14),

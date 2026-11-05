@@ -1,77 +1,82 @@
 import 'package:flutter/material.dart';
 
-import '../../data/mock_data.dart';
-import '../../theme/app_theme.dart';
+import '../../data/session.dart';
 import '../../widgets/common.dart';
 
-class EditProfileScreen extends StatelessWidget {
+class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
+
+  @override
+  State<EditProfileScreen> createState() => _EditProfileScreenState();
+}
+
+class _EditProfileScreenState extends State<EditProfileScreen> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _name;
+  late final TextEditingController _email;
+  late final TextEditingController _phone;
+
+  @override
+  void initState() {
+    super.initState();
+    final u = Session.instance.currentUser!;
+    _name = TextEditingController(text: u.name);
+    _email = TextEditingController(text: u.email);
+    _phone = TextEditingController(text: u.phone);
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _phone.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final current = Session.instance.currentUser!;
+    await Session.instance.updateLocalProfile(current.copyWith(
+      name: _name.text.trim(),
+      email: _email.text.trim(),
+      phone: _phone.text.trim(),
+    ));
+    if (!mounted) return;
+    Navigator.pop(context);
+    showSuccessSnack(context, 'Profil mis à jour (local)');
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Informations personnelles')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        children: [
-          const Center(
-            child: CircleAvatar(
-              radius: 50,
-              backgroundColor: AppColors.primaryLight,
-              child: Text('SB',
-                  style: TextStyle(
-                      color: AppColors.primary,
-                      fontSize: 32,
-                      fontWeight: FontWeight.w800)),
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          children: [
+            LabeledField(
+              label: 'Nom',
+              hint: 'Nom',
+              controller: _name,
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Requis' : null,
             ),
-          ),
-          Center(
-            child: TextButton.icon(
-              onPressed: () {},
-              icon: const Icon(Icons.camera_alt_outlined),
-              label: const Text('Changer la photo'),
+            LabeledField(
+              label: 'E-mail',
+              hint: 'email',
+              controller: _email,
+              validator: (v) =>
+                  (v == null || !v.contains('@')) ? 'E-mail invalide' : null,
             ),
-          ),
-          const SizedBox(height: 12),
-          const LabeledField(
-            label: 'Nom complet',
-            hint: 'Votre nom',
-            icon: Icons.person_outline_rounded,
-            initialValue: MockData.ownerName,
-          ),
-          const LabeledField(
-            label: 'Adresse e-mail',
-            hint: 'exemple@email.com',
-            icon: Icons.mail_outline_rounded,
-            initialValue: MockData.ownerEmail,
-          ),
-          const LabeledField(
-            label: 'Téléphone',
-            hint: '+33 …',
-            icon: Icons.phone_outlined,
-            initialValue: MockData.ownerPhone,
-          ),
-          const LabeledField(
-            label: 'Adresse',
-            hint: 'Votre adresse',
-            icon: Icons.home_outlined,
-            initialValue: '24 rue de la Roquette, 75011 Paris',
-          ),
-          const LabeledField(
-            label: 'Contact d\'urgence',
-            hint: 'Nom et téléphone',
-            icon: Icons.emergency_outlined,
-            initialValue: 'Karim Benali · +33 6 98 76 54 32',
-          ),
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              showSuccessSnack(context, 'Profil mis à jour');
-            },
-            child: const Text('Enregistrer'),
-          ),
-        ],
+            LabeledField(
+              label: 'Téléphone',
+              hint: 'Tél',
+              controller: _phone,
+            ),
+            FilledButton(onPressed: _save, child: const Text('Enregistrer')),
+          ],
+        ),
       ),
     );
   }

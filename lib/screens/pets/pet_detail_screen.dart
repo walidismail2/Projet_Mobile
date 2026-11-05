@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../data/mock_data.dart';
+import '../../models/models.dart';
+import '../../repositories/health_repository.dart';
+import '../../repositories/pet_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import 'pet_form_screen.dart';
@@ -85,7 +87,7 @@ class PetDetailScreen extends StatelessWidget {
                   children: [
                     _StatBox(
                         label: 'Âge',
-                        value: pet.age,
+                        value: pet.computedAge,
                         icon: Icons.cake_rounded,
                         color: AppColors.primary),
                     const SizedBox(width: 12),
@@ -129,38 +131,47 @@ class PetDetailScreen extends StatelessWidget {
                 const SectionHeader('Évolution du poids'),
                 _WeightChart(pet: pet),
                 const SizedBox(height: 24),
-                const SectionHeader('Résumé'),
-                const Row(
-                  children: [
-                    _SummaryTile(
-                        icon: Icons.vaccines_rounded,
-                        color: AppColors.health,
-                        title: '4 vaccins',
-                        subtitle: '1 en retard'),
-                    SizedBox(width: 12),
-                    _SummaryTile(
-                        icon: Icons.medication_rounded,
-                        color: AppColors.purple,
-                        title: '3 traitements',
-                        subtitle: '1 en cours'),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                const Row(
-                  children: [
-                    _SummaryTile(
-                        icon: Icons.event_available_rounded,
-                        color: AppColors.vet,
-                        title: 'RDV le 02/10',
-                        subtitle: 'Dr. Martin'),
-                    SizedBox(width: 12),
-                    _SummaryTile(
-                        icon: Icons.restaurant_rounded,
-                        color: AppColors.food,
-                        title: '4 repas / jour',
-                        subtitle: '1 120 kcal'),
-                  ],
-                ),
+                const SectionHeader('Résumé santé'),
+                if (pet.id != null)
+                  FutureBuilder(
+                    future: HealthRepository().summaryForPet(pet.id!),
+                    builder: (context, snap) {
+                      final s = snap.data;
+                      final vaccines = s == null
+                          ? '…'
+                          : '${s.vaccinesOk + s.vaccinesLate} vaccin${(s.vaccinesOk + s.vaccinesLate) > 1 ? 's' : ''}';
+                      final vaccinesSub = s == null
+                          ? '…'
+                          : s.vaccinesLate == 0
+                              ? 'Tous à jour'
+                              : '${s.vaccinesLate} à surveiller';
+                      final treatments = s == null
+                          ? '…'
+                          : '${s.treatmentsActive} traitement${s.treatmentsActive > 1 ? 's' : ''}';
+                      final treatmentsSub = s == null
+                          ? '…'
+                          : s.treatmentsActive == 0
+                              ? 'Aucun en cours'
+                              : 'En cours';
+                      return Row(
+                        children: [
+                          _SummaryTile(
+                            icon: Icons.vaccines_rounded,
+                            color: AppColors.health,
+                            title: vaccines,
+                            subtitle: vaccinesSub,
+                          ),
+                          const SizedBox(width: 12),
+                          _SummaryTile(
+                            icon: Icons.medication_rounded,
+                            color: AppColors.purple,
+                            title: treatments,
+                            subtitle: treatmentsSub,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 const SizedBox(height: 28),
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
@@ -175,7 +186,10 @@ class PetDetailScreen extends StatelessWidget {
                           'Cette action est irréversible. Toutes les données de ${pet.name} seront perdues.',
                       confirmLabel: 'Supprimer',
                     );
-                    if (ok && context.mounted) Navigator.pop(context);
+                    if (ok && context.mounted && pet.id != null) {
+                      await PetRepository().delete(pet.id!);
+                      if (context.mounted) Navigator.pop(context);
+                    }
                   },
                   icon: const Icon(Icons.delete_outline_rounded),
                   label: Text('Supprimer ${pet.name}'),

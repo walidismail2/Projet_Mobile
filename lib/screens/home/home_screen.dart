@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../data/mock_data.dart';
+import '../../data/app_refresh.dart';
+import '../../data/session.dart';
+import '../../models/models.dart';
+import '../../repositories/appointment_repository.dart';
+import '../../repositories/pet_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../notifications/notifications_screen.dart';
@@ -9,119 +13,102 @@ import '../pets/pet_form_screen.dart';
 import '../profile/profile_screen.dart';
 import '../vets/vet_search_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   final ValueChanged<int> onNavigate;
-
   const HomeScreen({super.key, required this.onNavigate});
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  late Future<_Data> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+    AppRefresh.instance.addListener(_onDataChanged);
+  }
+
+  @override
+  void dispose() {
+    AppRefresh.instance.removeListener(_onDataChanged);
+    super.dispose();
+  }
+
+  void _onDataChanged() {
+    if (!mounted) return;
+    setState(_reload);
+  }
+
+  void _reload() {
+    _future = () async {
+      final ownerId = Session.instance.userId;
+      if (ownerId == null) {
+        return _Data(pets: const [], next: null);
+      }
+      final pets = await PetRepository().getByOwner(ownerId);
+      final appts = await AppointmentRepository().getAll();
+      final next = appts
+          .where((a) => a.status == AppointmentStatus.upcoming)
+          .toList();
+      return _Data(pets: pets, next: next.isEmpty ? null : next.first);
+    }();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final next = MockData.appointments.first;
+    final user = Session.instance.currentUser;
+    final first = user?.name.split(' ').first ?? 'ami';
+    final initials = () {
+      final n = user?.name ?? '?';
+      final p = n.trim().split(RegExp(r'\s+'));
+      if (p.length >= 2) return '${p[0][0]}${p[1][0]}'.toUpperCase();
+      return n.isEmpty ? '?' : n[0].toUpperCase();
+    }();
 
     return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.only(bottom: 24),
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                  ),
-                  child: const CircleAvatar(
-                    radius: 24,
-                    backgroundColor: AppColors.primaryLight,
-                    child: Text('SB',
-                        style: TextStyle(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w800)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Bonjour Sarah 👋', style: text.titleLarge),
-                      Text('Mercredi 30 septembre', style: text.bodyMedium),
-                    ],
-                  ),
-                ),
-                RoundIconButton(
-                  Icons.notifications_none_rounded,
-                  badge: true,
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const NotificationsScreen()),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: SectionHeader('Mes animaux',
-                action: 'Voir tout', onAction: () => onNavigate(1)),
-          ),
-          SizedBox(
-            height: 150,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              children: [
-                for (final pet in MockData.pets) ...[
-                  _PetCard(pet: pet),
-                  const SizedBox(width: 12),
-                ],
-                _AddPetCard(),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SectionHeader('Prochain rendez-vous',
-                    action: 'Tous', onAction: () => onNavigate(3)),
-                _NextAppointmentCard(appointment: next),
-                const SizedBox(height: 24),
-                const SectionHeader('Accès rapide'),
-                Row(
+      child: FutureBuilder<_Data>(
+        future: _future,
+        builder: (context, snap) {
+          if (!snap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final data = snap.data!;
+          return ListView(
+            padding: const EdgeInsets.only(bottom: 24),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: Row(
                   children: [
-                    _QuickAction(
-                      icon: Icons.vaccines_rounded,
-                      label: 'Santé',
-                      color: AppColors.health,
-                      onTap: () => onNavigate(2),
-                    ),
-                    _QuickAction(
-                      icon: Icons.local_hospital_rounded,
-                      label: 'Vétérinaire',
-                      color: AppColors.vet,
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const VetSearchScreen()),
+                    GestureDetector(
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ProfileScreen()),
+                        );
+                        if (mounted) setState(_reload);
+                      },
+                      child: CircleAvatar(
+                        radius: 24,
+                        backgroundColor: AppColors.primaryLight,
+                        child: Text(initials,
+                            style: const TextStyle(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.w800)),
                       ),
                     ),
-                    _QuickAction(
-                      icon: Icons.restaurant_rounded,
-                      label: 'Repas',
-                      color: AppColors.food,
-                      onTap: () => onNavigate(4),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text('Bonjour $first 👋',
+                          style: Theme.of(context).textTheme.titleLarge),
                     ),
-                    _QuickAction(
-                      icon: Icons.notifications_active_rounded,
-                      label: 'Rappels',
-                      color: AppColors.reminder,
+                    RoundIconButton(
+                      Icons.notifications_none_rounded,
+                      badge: true,
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -130,347 +117,210 @@ class HomeScreen extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 24),
-                const SectionHeader('Aujourd\'hui'),
-                const _TodayReminder(
-                  icon: Icons.restaurant_rounded,
-                  color: AppColors.food,
-                  title: 'Friandise de Rocky',
-                  subtitle: 'Bâtonnet dentaire · 1 unité',
-                  time: '16:00',
-                ),
-                const _TodayReminder(
-                  icon: Icons.medication_rounded,
-                  color: AppColors.purple,
-                  title: 'Antibiotique de Luna',
-                  subtitle: '1 comprimé · jour 4/10',
-                  time: '18:00',
-                ),
-                const _TodayReminder(
-                  icon: Icons.restaurant_rounded,
-                  color: AppColors.food,
-                  title: 'Dîner de Rocky',
-                  subtitle: 'Croquettes · 130 g',
-                  time: '19:30',
-                ),
-                const SizedBox(height: 12),
-                const _HealthTipCard(),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PetCard extends StatelessWidget {
-  final Pet pet;
-
-  const _PetCard({required this.pet});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => PetDetailScreen(pet: pet)),
-      ),
-      child: Container(
-        width: 120,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: pet.color.withValues(alpha: 0.25),
-          borderRadius: BorderRadius.circular(22),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              alignment: Alignment.center,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
               ),
-              child: Text(pet.emoji, style: const TextStyle(fontSize: 30)),
-            ),
-            const Spacer(),
-            Text(pet.name,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16,
-                    color: AppColors.navy)),
-            Text('${pet.age} · ${pet.weight} kg',
-                style: const TextStyle(
-                    fontSize: 12, color: AppColors.textSecondary)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AddPetCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const PetFormScreen()),
-      ),
-      child: Container(
-        width: 100,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: AppColors.border, width: 1.5),
-        ),
-        child: const Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: AppColors.primaryLight,
-              child: Icon(Icons.add_rounded, color: AppColors.primary),
-            ),
-            SizedBox(height: 10),
-            Text('Ajouter',
-                style: TextStyle(
-                    fontWeight: FontWeight.w700, color: AppColors.navy)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _NextAppointmentCard extends StatelessWidget {
-  final Appointment appointment;
-
-  const _NextAppointmentCard({required this.appointment});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF5B8CFF), Color(0xFF3D63E0)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Text(appointment.vet.initials,
-                    style: const TextStyle(
-                        color: AppColors.vet,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 18)),
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: SectionHeader('Mes animaux',
+                    action: 'Voir tout',
+                    onAction: () => widget.onNavigate(1)),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              SizedBox(
+                height: 140,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
                   children: [
-                    Text(appointment.vet.name,
-                        style: const TextStyle(
+                    for (final pet in data.pets) ...[
+                      GestureDetector(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => PetDetailScreen(pet: pet)),
+                        ),
+                        child: Container(
+                          width: 110,
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
                             color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16)),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${appointment.reason} · ${appointment.pet.name}',
-                      style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.85),
-                          fontSize: 13),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Column(
+                            children: [
+                              PetAvatar(pet, size: 56),
+                              const SizedBox(height: 8),
+                              Text(pet.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700)),
+                              Text(pet.species,
+                                  style:
+                                      Theme.of(context).textTheme.bodyMedium),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                    GestureDetector(
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const PetFormScreen()),
+                        );
+                        if (!mounted) return;
+                        setState(_reload);
+                        AppRefresh.instance.petsChanged();
+                      },
+                      child: Container(
+                        width: 90,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: const Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add, color: AppColors.primary),
+                            Text('Ajouter',
+                                style: TextStyle(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
-              Text(appointment.pet.emoji,
-                  style: const TextStyle(fontSize: 30)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SectionHeader('Prochain rendez-vous',
+                        action: 'Tous',
+                        onAction: () => widget.onNavigate(3)),
+                    if (data.next == null)
+                      const AppCard(
+                          child: Text('Aucun rendez-vous à venir'))
+                    else
+                      AppCard(
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 56,
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary
+                                    .withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Column(
+                                children: [
+                                  Text(data.next!.day,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 20,
+                                          color: AppColors.primary)),
+                                  Text(data.next!.month,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 11,
+                                          color: AppColors.primary)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(data.next!.reason,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700)),
+                                  Text(data.next!.vet?.name ??
+                                      'Vétérinaire'),
+                                  Text(
+                                      '${data.next!.time} · ${data.next!.pet?.name ?? ''}'),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: AppCard(
+                            onTap: () => widget.onNavigate(2),
+                            child: const Column(
+                              children: [
+                                IconBadge(Icons.vaccines_rounded,
+                                    AppColors.health),
+                                SizedBox(height: 8),
+                                Text('Santé',
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: AppCard(
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const VetSearchScreen()),
+                            ),
+                            child: const Column(
+                              children: [
+                                IconBadge(
+                                    Icons.search_rounded, AppColors.vet),
+                                SizedBox(height: 8),
+                                Text('Vétos',
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: AppCard(
+                            onTap: () => widget.onNavigate(4),
+                            child: const Column(
+                              children: [
+                                IconBadge(Icons.restaurant_rounded,
+                                    AppColors.food),
+                                SizedBox(height: 8),
+                                Text('Repas',
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.calendar_today_rounded,
-                    color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(appointment.date,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w600)),
-                ),
-                const Icon(Icons.access_time_rounded,
-                    color: Colors.white, size: 18),
-                const SizedBox(width: 6),
-                Text(appointment.time,
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 }
 
-class _QuickAction extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _QuickAction({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Column(
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.navy.withValues(alpha: 0.05),
-                    blurRadius: 14,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Icon(icon, color: color, size: 28),
-            ),
-            const SizedBox(height: 8),
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.navy)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TodayReminder extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String subtitle;
-  final String time;
-
-  const _TodayReminder({
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.subtitle,
-    required this.time,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: AppCard(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            IconBadge(icon, color),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppColors.background,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(time,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, color: AppColors.navy)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _HealthTipCard extends StatelessWidget {
-  const _HealthTipCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.health.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: const Row(
-        children: [
-          Text('💡', style: TextStyle(fontSize: 34)),
-          SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Conseil du jour',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w800, color: AppColors.health)),
-                SizedBox(height: 4),
-                Text(
-                  'Pensez à laisser de l\'eau fraîche à disposition de vos animaux toute la journée.',
-                  style: TextStyle(color: AppColors.navy, height: 1.4),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+class _Data {
+  final List<Pet> pets;
+  final Appointment? next;
+  _Data({required this.pets, required this.next});
 }
