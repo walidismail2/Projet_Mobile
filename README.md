@@ -1,6 +1,6 @@
-# PetCare — Flutter + SQLite + Firebase
+# PetCare — Application Mobile (Flutter + SQLite + Firebase)
 
-Application de gestion d’animaux domestiques.
+Application mobile de gestion d'animaux domestiques.
 
 ## Architecture — moitié locale, moitié cloud
 
