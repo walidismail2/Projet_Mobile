@@ -103,3 +103,5 @@ flutter run
 ```
 
 Pas de backend Node. Internet requis (Firebase).
+
+<!-- mise à jour mineure -->
