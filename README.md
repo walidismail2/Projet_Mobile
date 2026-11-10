@@ -1,105 +1,105 @@
-# PetCare — Flutter + SQLite + Firebase
+# PetCare — Flutter + SQLite
 
-Application de gestion d’animaux domestiques.
+Application de gestion d’animaux domestiques. **100 % local** : Auth, données et annuaire tournent sur **SQLite** (pas de Firebase / pas de backend Node).
 
-## Architecture — moitié locale, moitié cloud
+Docs détaillées : **`MODULES.md`** (chaque module, pages, services, tables, APIs) · `lib/STRUCTURE.md` (arborescence).
 
-Règle : **SQLite** = journal privé du propriétaire (fonctionne hors ligne). **Firebase** = données partagées entre le propriétaire et le vétérinaire.
+## Valeur ajoutée — API externes
 
-| SQLite (local) | Firebase |
+### Module Animaux
+Boutique **Accessoires** (SQLite) : catalogue, panier, quantités, achat (stock).  
+CRUD produit réservé au compte **admin** (`admin@petcare.local` / `admin123`).
+
+À l’ajout / édition d’un **Chien** ou **Chat** :
+- races via **Dog CEO** ou **The Cat API**
+- photo locale (galerie / caméra + crop circulaire) → `pets.photo_path`
+- photo d’exemple HTTP → race sauvée en SQLite (`pets.breed`)
+
+Sur la **fiche animal** → section **Idéal race & âge** :
+- Chiens : [Dog API](https://dogapi.dog) (poids, durée de vie, exercice)
+- Chats : The Cat API (poids / longévité)
+- + conseils selon l’âge (chiot/chaton, adulte, senior) ; fallback local si API KO
+
+### Module Santé
+- Conseil météo compact via [Open-Meteo](https://open-meteo.com/) (lien cliquable)
+- Suggestions de vaccins selon espèce + âge ([WSAVA](https://wsava.org/global-guidelines/vaccination-guidelines/))
+- Cache SQLite hors ligne (`health_tips_cache`)
+
+### Module Compte
+- Inscription propriétaire → **adresse** ou GPS (`36,6833, 10,3007`) via [Nominatim](https://nominatim.openstreetmap.org) → recommandation du **vétérinaire le plus proche**
+- **Trouver un vétérinaire** → [Overpass / OpenStreetMap](https://wiki.openstreetmap.org/wiki/Overpass_API) liste les vrais cabinets `amenity=veterinary` autour de l’adresse (+ seed SQLite, fallback Nominatim, cache local)
+- Fiche vétérinaire → géocoder l’adresse, sauve lat/lon en SQLite, bouton **Ouvrir Maps**
+- Profil : **photo** (même principe que les animaux) + **modifier le mot de passe**
+
+## Architecture code
+
+```
+lib/
+  core/                 # data SQLite, session, theme, widgets, shell
+  modules/
+    animaux/            # screens + repositories + APIs races
+    sante/              # screens + repositories + Open-Meteo / vaccins
+    alimentation/       # screens + repositories
+    compte/             # auth, profil (photo/MDP), vétos OSM, RDV, notifs, rôle véto
+```
+
+Tout est stocké dans `petcare.db` sur l’appareil (migrations jusqu’à **v10**).
+
+| Module | Tables SQLite |
 |---|---|
-| Vaccins, traitements, consultations | Compte Auth + profil `users` |
-| Documents PDF / images (fichier sur le téléphone) | Fiche animal (copie, pour que le véto retrouve l’animal) |
-| Repas du jour (fait / pas fait) | Régime prescrit + aliments autorisés / interdits |
-| Rendez-vous | Annuaire des vétérinaires |
-| Rappels | |
+| **1. Animaux** | `pets`, `accessories`, `cart_items` |
+| **2. Santé** | `vaccines`, `treatments`, `medical_documents`, `health_tips_cache` |
+| **3. Alimentation** | `meals`, `diets`, `food_items` |
+| **4. Compte** | `users` (hash + adresse/GPS + `photo_path`), `appointments`, `notifications`, `custom_reminders`, `vets_cache` |
 
-L’animal est **écrit d’abord en SQLite**, puis une copie (nom, espèce, puce, e-mail du propriétaire) part sur Firestore. Si le réseau coupe, l’app locale continue.
+## 4 modules — CRUD + SQLite
 
-Onglets propriétaire : Accueil, Animaux, Santé, RDV, Repas.
+| # | Module | Create | Read | Update | Delete |
+|---|---|---|---|---|---|
+| 1 | **Animaux** | Animal + panier (+ accessoire **admin**) | Liste + boutique | Modifier | Supprimer |
+| 2 | **Santé** | Vaccin / traitement / document | Onglets | Modifier | Supprimer |
+| 3 | **Alimentation** | Ajouter un repas | Liste + régime | Modifier + « fait » | Supprimer |
+| 4 | **Compte** | Inscription + RDV + rappel | Profil / notifs / RDV | Profil, photo, MDP, RDV | Supprimer RDV / notif |
+
+Navigation : 4 onglets — Animaux, Santé, Alimentation, Compte.
+
+## Auth locale
+
+- Inscription / connexion en **SQLite** (`users` + hash SHA-256 + salt)
+- Rôles : **propriétaire**, **vétérinaire**, **admin**
+- Compte véto → fiche ajoutée dans l’annuaire local (`vets_cache`)
+- Session « Se souvenir de moi » via SharedPreferences (pas le mot de passe)
+- Changement de mot de passe depuis Compte → Profil
 
 ## Santé
 
-Données locales (SQLite), par animal.
-
-- **Vaccins** : statut calculé depuis la date du rappel — À jour, Bientôt (≤ 30 jours), En retard
-- **Traitements** : dosage, fréquence, durée, bouton « Jour pris », barre de progression
-- **Consultations** : motif + compte rendu
-- **Documents** : upload **PDF** (fichiers) ou **image** (galerie / photo), copie locale, ouverture dans l’app
-- Suppression de chaque entrée ; résumé vaccins / traitements sur la fiche animal
-
-Pas de carte Google Maps : l’annuaire affiche l’adresse en texte.
-
-## Créer un compte vétérinaire
-
-1. Dans l’app → **Inscription**
-2. Choisis **Vétérinaire** (segmented button)
-3. Remplis spécialité, clinique, adresse, services, horaires, téléphone → confirme l’e-mail
-4. **Connexion** → tu arrives dans l’**Espace vétérinaire** (la fiche est publiée dans l’annuaire)
-5. Cherche le propriétaire par **e-mail** → ouvre un animal → prescrit le régime
-
-> Différent de l’annuaire « Dr. Claire Martin… » (fiches pour prendre RDV).  
-> Le **compte véto** = login pour **prescrire**. L’annuaire = liste publique Firestore `vets`.
-
-### Alternative console Firebase
-
-1. Authentication → ajoute un user (e-mail/mdp)
-2. Firestore → `users/{uid}` avec champs :
-   - `username`, `email`, `role: "vet"`
+Données locales par animal : vaccins, traitements, documents PDF/images.
+Onglets : Vaccins, Soins, Docs (+ bandeau conseil météo).
 
 ## Flux alimentation
 
 | Qui | Fait quoi |
 |---|---|
-| Propriétaire | Ajoute repas du jour (SQLite) |
-| Vétérinaire | Prescrit régime + autorisés/interdits (Firestore) |
-| Propriétaire | Voit le régime en **lecture seule** dans Alimentation |
+| Propriétaire | Ajoute les repas du jour (`meals`) |
+| Vétérinaire | Cherche le propriétaire par e-mail (même base SQLite) et prescrit régime + aliments (`diets`, `food_items`) |
+| Propriétaire | Voit le régime en lecture seule dans Alimentation |
 
-## Règles Firestore (démo)
+> Proprio et véto doivent utiliser **le même appareil / la même base** pour la prescription (app 100 % offline).
 
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /vets/{id} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-    match /pets/{id} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-    match /pet_diets/{id} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-    match /pet_food_items/{id} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-  }
-}
-```
+## Annuaire vétos
+
+Seed local (`Dr. Claire Martin…` + ESPRIT Ariana) dans `vets_cache` au premier lancement.  
+Recherche OSM via Overpass ; pas de carte Google Maps intégrée : adresse texte + **Ouvrir Maps**.
 
 ## Notifications
 
-Alertes **locales** sur le téléphone (`flutter_local_notifications`), pas une simple liste.
-
-- Vaccin : le matin du rappel (si la date est déjà passée, une alerte part tout de suite)
-- Traitement : chaque jour à 9h, jusqu’à ce qu’il soit terminé
-- Repas : chaque jour à l’heure du repas
-- Rendez-vous : 1 h avant (si le créneau est déjà passé, une alerte part à la réservation)
-- Rappel personnalisé : à la date et l’heure choisies
-
-Les interrupteurs (types, son, vibration, 22h–7h) sont dans **Notifications → réglages**. Tout reste sur l’appareil.
+Alertes locales (`flutter_local_notifications`) : vaccins, traitements, repas, RDV, anniversaires, rappels personnalisés.
 
 ## Lancer
 
 ```bash
+flutter pub get
 flutter run
 ```
 
-Pas de backend Node. Internet requis (Firebase).
+100 % SQLite (pas de backend Node). Internet utile pour les APIs (races, météo, OSM).
