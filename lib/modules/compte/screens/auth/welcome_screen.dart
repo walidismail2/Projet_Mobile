@@ -24,37 +24,29 @@ class WelcomeScreen extends StatelessWidget {
             child: Column(
               children: [
                 const Spacer(),
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Container(
-                      width: 260,
-                      height: 260,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
-                        shape: BoxShape.circle,
+                Container(
+                  width: 220,
+                  height: 220,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.15),
+                        blurRadius: 30,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Image.asset(
+                        'assets/images/logo.png',
+                        fit: BoxFit.contain,
                       ),
                     ),
-                    Container(
-                      width: 200,
-                      height: 200,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.18),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const Text('🐶', style: TextStyle(fontSize: 96)),
-                    const Positioned(
-                      right: 20,
-                      top: 30,
-                      child: Text('🐱', style: TextStyle(fontSize: 48)),
-                    ),
-                    const Positioned(
-                      left: 18,
-                      bottom: 36,
-                      child: Text('🐰', style: TextStyle(fontSize: 42)),
-                    ),
-                  ],
+                  ),
                 ),
                 const SizedBox(height: 40),
                 Row(
