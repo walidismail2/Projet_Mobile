@@ -14,7 +14,7 @@ Fichier lié : `lib/STRUCTURE.md` (arborescence).
 | — | **Core** (partagé) | `lib/core/` | SQLite, session, thème, widgets, shell |
 | 1 | **Animaux** | `lib/modules/animaux/` | Animaux + boutique accessoires |
 | 2 | **Santé** | `lib/modules/sante/` | Vaccins, traitements, documents, conseils météo |
-| 3 | **Alimentation** | `lib/modules/alimentation/` | Repas + régime prescrit par le véto |
+| 3 | **Alimentation** | `lib/modules/alimentation/` | Repas, régime prescrit par le véto, poids, stock de nourriture |
 | 4 | **Compte (User)** | `lib/modules/compte/` | Auth, profil (photo + MDP), vétos OSM, RDV, notifs, rôle véto / admin |
 
 Point d’entrée : `lib/main.dart`  
@@ -31,7 +31,7 @@ Infrastructure utilisée par **tous** les modules.
 
 | Fichier | Rôle |
 |---|---|
-| `data/app_database.dart` | Base `petcare.db` (création tables + migrations v1→v10) |
+| `data/app_database.dart` | Base `petcare.db` (création tables + migrations v1→v12) |
 | `data/session.dart` | Utilisateur connecté en mémoire + sync prefs/SQLite |
 | `data/auth_prefs.dart` | « Se souvenir de moi », préférences rappels |
 | `data/app_refresh.dart` | Notifie les écrans quand les données changent |
@@ -147,35 +147,57 @@ Suivi santé par animal : vaccins, traitements, documents + conseil météo.
 ## Module 3 — Alimentation (`lib/modules/alimentation/`)
 
 ### Objectif
-Repas du jour côté propriétaire + régime / aliments prescrits par le vétérinaire.
+Repas du jour côté propriétaire + régime / aliments prescrits par le vétérinaire + suivi du poids + stock de nourriture.
 
 ### CRUD
 | Entité | Create | Read | Update | Delete |
 |---|---|---|---|---|
-| Repas (`meals`) | Proprio | Liste du jour | Modifier / marquer « fait » | Oui |
+| Repas (`meals`) | Proprio — quotidien ou ponctuel (date) | Repas d’un jour (navigation ‹ date ›) | Modifier | Oui (l’historique reste) |
+| « Fait » (`meal_logs`) | Proprio coche un repas pour un jour | Kcal / repas du jour, historique | — | Décocher |
 | Régime (`diets`) | Véto (prescription) | Lecture proprio | Véto | — |
 | Aliments (`food_items`) | Véto | Autorisés / interdits | Véto | — |
+| Pesée (`weight_logs`) | Proprio | Onglet Poids (courbe + historique) | Modifier | Oui |
+| Stock (`food_stock`) | Proprio | Onglet Stock (reste, jours, date de fin) | Modifier / « Nouveau sac » | Oui |
+
+Supprimer un animal supprime aussi ses repas, régime, aliments, pesées et stock (transaction dans `PetRepository.delete`) et annule ses notifications (`LocalNotifications.cancelForPet`).
 
 ### Tables SQLite
-- `meals`
+- `meals` (v12 : `date` = null si quotidien, `created_on`, `product_code`, `kcal_100g`)
+- `meal_logs` (v12 — copie du repas coché, unique par repas et par jour)
+- `pet_food_cache` (v12 — produits Open Pet Food Facts, recherche hors ligne)
 - `diets`
 - `food_items`
+- `weight_logs` (v11 — date ISO `AAAA-MM-JJ`)
+- `food_stock` (v11 — taille du sac, ration/jour, date d’ouverture, jours d’alerte)
 
 ### Screens
 
 | Fichier | Description |
 |---|---|
-| `screens/food_screen.dart` | Onglets Aujourd’hui / Autorisés / Interdits + résumé kcal / régime |
-| `screens/add_meal_screen.dart` | Ajouter ou modifier un repas |
+| `screens/food_screen.dart` | Onglets Repas (navigation par jour) / Autorisés / Interdits / Poids / Stock + résumé kcal / régime / stock bas ; bouton flottant selon l’onglet |
+| `screens/add_meal_screen.dart` | Ajouter / modifier un repas : quotidien ou ponctuel, produit Open Pet Food Facts, kcal calculées, alerte aliment à risque |
+| `screens/product_search_screen.dart` | Recherche produit (nom, marque, code-barres), filtre espèce, fiche produit + analyse des ingrédients |
+| `screens/can_eat_screen.dart` | « Peut-il manger ça ? » (hors ligne) |
+| `screens/meal_history_screen.dart` | Recherche dans l’historique des repas cochés : texte, période (7 j, mois, mois dernier, 30 j, tout, dates), type de repas ; totaux kcal / jours / grammes ; toucher un jour → ouvre ce jour |
+| `widgets/weight_tab.dart` | Onglet Poids : dernière pesée, écarts, courbe (toucher un point), historique, formulaire pesée |
+| `widgets/food_stock_tab.dart` | Onglet Stock : barre de reste, jours restants, « Nouveau sac », formulaire (ration suggérée d’après les repas) |
 
 ### Repositories
 
 | Fichier | Description |
 |---|---|
-| `repositories/food_repository.dart` | CRUD repas + lecture régime/aliments pour le proprio |
+| `repositories/food_repository.dart` | CRUD repas, lecture régime/aliments, `savePrescription` (véto, transaction + notification proprio), `deleteAllForPet` |
+| `repositories/weight_repository.dart` | CRUD pesées ; recopie la dernière dans `pets.weight` |
+| `repositories/food_stock_repository.dart` | CRUD stock de nourriture |
 
 ### Services / APIs
-Aucun service HTTP dédié dans ce module (données 100 % SQLite).  
+
+| Fichier | API / logique | Usage |
+|---|---|---|
+| `services/pet_food_api_service.dart` | **Open Pet Food Facts** (`/cgi/search.pl`, `/api/v2/product/{code}.json`) + cache SQLite | Recherche produit, kcal/100 g (déclarées ou Atwater modifiée), repli hors ligne |
+| `services/meal_history.dart` | Logique locale (pas d’API) | Périodes, filtre texte sans accents, totaux, regroupement par jour, libellés de date FR |
+| `services/food_safety_service.dart` | Base locale `data/toxic_foods.dart` + prescription véto | « Peut-il manger ça ? », analyse des ingrédients et du nom de l’aliment |
+
 La prescription se fait depuis le **module Compte → rôle vétérinaire**.
 
 ### Flux clés
@@ -183,7 +205,9 @@ La prescription se fait depuis le **module Compte → rôle vétérinaire**.
 |---|---|
 | Propriétaire | Ajoute / coche les repas |
 | Vétérinaire | Cherche le proprio par e-mail → prescrit régime + aliments |
-| Propriétaire | Voit le régime en lecture seule |
+| Propriétaire | Voit le régime en lecture seule + notification « Nouvelle prescription 🩺 » |
+| Propriétaire | Pèse l’animal → courbe de poids |
+| Propriétaire | Déclare un sac → alerte « Stock bas 🛒 » à 9h, N jours avant la fin |
 
 > Même appareil / même base SQLite requis (app offline).
 
@@ -288,7 +312,7 @@ Auth locale, profil, annuaire vétos (seed + OSM), rendez-vous, notifications, e
 | Animaux | Dog CEO, The Cat API, Dog API | Oui |
 | Santé | Open-Meteo | Oui |
 | Compte | Nominatim, Overpass (OSM) | Oui |
-| Alimentation | — | — |
+| Alimentation | Open Pet Food Facts | Oui |
 
 Internet requis uniquement pour ces appels ; le reste fonctionne offline via SQLite.
 

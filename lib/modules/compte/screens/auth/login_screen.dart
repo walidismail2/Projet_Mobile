@@ -190,7 +190,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             border: Border.all(
                               color: AppColors.primary.withValues(alpha: 0.3),
                             ),
-                          ],
+                          ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: const [

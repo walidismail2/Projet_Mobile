@@ -193,7 +193,6 @@ class _VetPatientsScreenState extends State<VetPatientsScreen> {
                     context,
                     MaterialPageRoute(
                       builder: (_) => VetPrescribeScreen(
-                        ownerId: p['ownerId']?.toString() ?? '',
                         localPetId: (p['localPetId'] as num).toInt(),
                         petName: p['name']?.toString() ?? 'Animal',
                         petEmoji: p['emoji']?.toString() ?? '🐾',

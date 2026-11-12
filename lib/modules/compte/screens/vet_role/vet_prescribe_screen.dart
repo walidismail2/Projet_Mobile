@@ -1,19 +1,18 @@
 import 'package:flutter/material.dart';
 
+import 'package:flutter_example/core/data/session.dart';
 import 'package:flutter_example/core/models/models.dart';
 import 'package:flutter_example/modules/alimentation/repositories/food_repository.dart';
 import 'package:flutter_example/core/theme/app_theme.dart';
 import 'package:flutter_example/core/widgets/common.dart';
 
 class VetPrescribeScreen extends StatefulWidget {
-  final String ownerId;
   final int localPetId;
   final String petName;
   final String petEmoji;
 
   const VetPrescribeScreen({
     super.key,
-    required this.ownerId,
     required this.localPetId,
     required this.petName,
     required this.petEmoji,
@@ -53,20 +52,11 @@ class _VetPrescribeScreenState extends State<VetPrescribeScreen> {
   }
 
   Future<void> _load() async {
-    final diet = await _food.getDiet(
-      ownerId: widget.ownerId,
-      petId: widget.localPetId,
-    );
-    final allowed = await _food.getFoodItems(
-      ownerId: widget.ownerId,
-      petId: widget.localPetId,
-      allowed: true,
-    );
-    final forbidden = await _food.getFoodItems(
-      ownerId: widget.ownerId,
-      petId: widget.localPetId,
-      allowed: false,
-    );
+    final diet = await _food.getDiet(widget.localPetId);
+    final allowed =
+        await _food.getFoodItems(widget.localPetId, allowed: true);
+    final forbidden =
+        await _food.getFoodItems(widget.localPetId, allowed: false);
     if (!mounted) return;
     if (diet != null) {
       _type.text = diet.dietType;
@@ -109,8 +99,7 @@ class _VetPrescribeScreenState extends State<VetPrescribeScreen> {
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      await _food.upsertDiet(
-        ownerId: widget.ownerId,
+      await _food.savePrescription(
         diet: Diet(
           petId: widget.localPetId,
           dietType: _type.text.trim(),
@@ -118,14 +107,13 @@ class _VetPrescribeScreenState extends State<VetPrescribeScreen> {
           mealsPerDay: _meals.round(),
           notes: _notes.text.trim(),
         ),
-      );
-      await _food.replaceFoodItems(
-        ownerId: widget.ownerId,
-        petId: widget.localPetId,
-        items: _items,
+        items: List.of(_items),
+        petName: widget.petName,
+        vetName: Session.instance.currentUser?.name,
       );
       if (!mounted) return;
-      showSuccessSnack(context, 'Prescription enregistrée');
+      showSuccessSnack(
+          context, 'Prescription enregistrée · propriétaire notifié');
       Navigator.pop(context);
     } catch (_) {
       if (mounted) {

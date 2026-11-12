@@ -757,6 +757,24 @@ class Appointment {
       );
 }
 
+/// Icônes de repas connues, retrouvées depuis `icon_code` (SQLite).
+final _mealIcons = {
+  for (final icon in const [
+    Icons.restaurant_rounded,
+    Icons.breakfast_dining_rounded,
+    Icons.lunch_dining_rounded,
+    Icons.dinner_dining_rounded,
+    Icons.cookie_rounded,
+  ])
+    icon.codePoint: icon,
+};
+
+/// Repas planifié d'un animal.
+///
+/// - `date == null` → repas **quotidien**, valable à partir de `createdOn`.
+/// - `date != null` → repas **ponctuel**, uniquement ce jour-là.
+///
+/// « Fait » n'est plus stocké ici : il dépend du jour → voir [MealLog].
 class Meal {
   final int? id;
   final int petId;
@@ -765,8 +783,13 @@ class Meal {
   final String food;
   final String quantity;
   final int calories;
-  final bool done;
   final IconData icon;
+  final DateTime? date;
+  final DateTime createdOn;
+
+  /// Produit Open Pet Food Facts lié (code-barres), si choisi.
+  final String? productCode;
+  final double? kcalPer100g;
 
   Meal({
     this.id,
@@ -776,9 +799,20 @@ class Meal {
     required this.food,
     required this.quantity,
     required this.calories,
-    required this.done,
     required this.icon,
-  });
+    this.date,
+    DateTime? createdOn,
+    this.productCode,
+    this.kcalPer100g,
+  }) : createdOn = dayOnly(createdOn ?? DateTime.now());
+
+  bool get isDaily => date == null;
+
+  /// Le repas est-il prévu ce jour-là ?
+  bool appliesOn(DateTime day) {
+    final d = dayOnly(day);
+    return date == null ? !d.isBefore(createdOn) : dayOnly(date!) == d;
+  }
 
   Map<String, Object?> toMap() => {
         'id': id,
@@ -788,44 +822,171 @@ class Meal {
         'food': food,
         'quantity': quantity,
         'calories': calories,
-        'done': done ? 1 : 0,
+        // Colonne historique (v1–v11), remplacée par `meal_logs`.
+        'done': 0,
         'icon_code': icon.codePoint,
+        'date': date == null ? null : isoDate(date!),
+        'created_on': isoDate(createdOn),
+        'product_code': productCode,
+        'kcal_100g': kcalPer100g,
       };
 
-  factory Meal.fromMap(Map<String, Object?> m) => Meal(
+  factory Meal.fromMap(Map<String, Object?> m) {
+    final date = m['date'] as String?;
+    final created = m['created_on'] as String?;
+    return Meal(
+      id: m['id'] as int?,
+      petId: m['pet_id'] as int,
+      name: m['name'] as String,
+      time: m['time'] as String,
+      food: m['food'] as String,
+      quantity: m['quantity'] as String,
+      calories: m['calories'] as int,
+      // Icône constante (un IconData construit à l'exécution casse le
+      // « tree shaking » des icônes en build release).
+      icon: _mealIcons[m['icon_code']] ?? Icons.restaurant_rounded,
+      date: (date == null || date.isEmpty) ? null : DateTime.parse(date),
+      createdOn: (created == null || created.isEmpty)
+          ? DateTime(2000)
+          : DateTime.parse(created),
+      productCode: m['product_code'] as String?,
+      kcalPer100g: (m['kcal_100g'] as num?)?.toDouble(),
+    );
+  }
+}
+
+/// Repas marqué « fait » un jour donné (copie figée pour l'historique,
+/// même si le repas est modifié ou supprimé ensuite).
+class MealLog {
+  final int? id;
+  final int? mealId;
+  final int petId;
+  final DateTime date;
+  final String mealName;
+  final String time;
+  final String food;
+  final String quantity;
+  final int calories;
+
+  const MealLog({
+    this.id,
+    this.mealId,
+    required this.petId,
+    required this.date,
+    required this.mealName,
+    required this.time,
+    required this.food,
+    required this.quantity,
+    required this.calories,
+  });
+
+  factory MealLog.fromMeal(Meal meal, DateTime day) => MealLog(
+        mealId: meal.id,
+        petId: meal.petId,
+        date: dayOnly(day),
+        mealName: meal.name,
+        time: meal.time,
+        food: meal.food,
+        quantity: meal.quantity,
+        calories: meal.calories,
+      );
+
+  Map<String, Object?> toMap() => {
+        'id': id,
+        'meal_id': mealId,
+        'pet_id': petId,
+        'date': isoDate(date),
+        'meal_name': mealName,
+        'time': time,
+        'food': food,
+        'quantity': quantity,
+        'calories': calories,
+      };
+
+  factory MealLog.fromMap(Map<String, Object?> m) => MealLog(
         id: m['id'] as int?,
+        mealId: m['meal_id'] as int?,
         petId: m['pet_id'] as int,
-        name: m['name'] as String,
+        date: DateTime.parse(m['date'] as String),
+        mealName: m['meal_name'] as String,
         time: m['time'] as String,
         food: m['food'] as String,
         quantity: m['quantity'] as String,
         calories: m['calories'] as int,
-        done: (m['done'] as int) == 1,
-        // ignore: non_const_argument_for_const_parameter
-        icon: IconData(m['icon_code'] as int, fontFamily: 'MaterialIcons'),
       );
+}
 
-  Meal copyWith({
-    int? id,
-    int? petId,
-    String? name,
-    String? time,
-    String? food,
-    String? quantity,
-    int? calories,
-    bool? done,
-    IconData? icon,
-  }) =>
-      Meal(
-        id: id ?? this.id,
-        petId: petId ?? this.petId,
-        name: name ?? this.name,
-        time: time ?? this.time,
-        food: food ?? this.food,
-        quantity: quantity ?? this.quantity,
-        calories: calories ?? this.calories,
-        done: done ?? this.done,
-        icon: icon ?? this.icon,
+/// Ligne affichée pour un jour : repas prévu (+ log s'il est fait), ou log
+/// seul quand le repas a été supprimé depuis.
+class MealEntry {
+  final Meal? meal;
+  final MealLog? log;
+
+  const MealEntry({this.meal, this.log})
+      : assert(meal != null || log != null);
+
+  bool get done => log != null;
+  String get name => log?.mealName ?? meal!.name;
+  String get time => log?.time ?? meal!.time;
+  String get food => log?.food ?? meal!.food;
+  String get quantity => log?.quantity ?? meal!.quantity;
+  int get calories => log?.calories ?? meal!.calories;
+}
+
+/// Produit d'Open Pet Food Facts (mis en cache dans `pet_food_cache`).
+class PetFoodProduct {
+  final String code;
+  final String name;
+  final String brand;
+  final String imageUrl;
+  final String quantity;
+
+  /// `dog`, `cat` ou `''` (les deux / inconnu).
+  final String species;
+  final double? kcalPer100g;
+
+  /// `true` si les kcal sont estimées depuis l'analyse (protéines, graisses…).
+  final bool kcalEstimated;
+  final String ingredients;
+
+  const PetFoodProduct({
+    required this.code,
+    required this.name,
+    required this.brand,
+    this.imageUrl = '',
+    this.quantity = '',
+    this.species = '',
+    this.kcalPer100g,
+    this.kcalEstimated = false,
+    this.ingredients = '',
+  });
+
+  String get displayName => brand.isEmpty ? name : '$brand · $name';
+
+  Map<String, Object?> toMap() => {
+        'code': code,
+        'name': name,
+        'brand': brand,
+        'image_url': imageUrl,
+        'quantity': quantity,
+        'species': species,
+        'kcal_100g': kcalPer100g,
+        'kcal_estimated': kcalEstimated ? 1 : 0,
+        'ingredients': ingredients,
+        'search_text': normalizeText('$brand $name'),
+        'fetched_at': DateTime.now().toIso8601String(),
+      };
+
+  factory PetFoodProduct.fromMap(Map<String, Object?> m) => PetFoodProduct(
+        code: m['code'] as String,
+        name: m['name'] as String,
+        brand: m['brand'] as String? ?? '',
+        imageUrl: m['image_url'] as String? ?? '',
+        quantity: m['quantity'] as String? ?? '',
+        species: m['species'] as String? ?? '',
+        kcalPer100g: (m['kcal_100g'] as num?)?.toDouble(),
+        kcalEstimated: (m['kcal_estimated'] as int? ?? 0) == 1,
+        ingredients: m['ingredients'] as String? ?? '',
       );
 }
 
@@ -899,6 +1060,183 @@ class Diet {
         mealsPerDay: m['meals_per_day'] as int,
         notes: m['notes'] as String? ?? '',
       );
+}
+
+/// Pesée d'un animal (module Alimentation · suivi du poids).
+/// `date` est stockée en ISO `AAAA-MM-JJ` pour trier en SQL.
+class WeightLog {
+  final int? id;
+  final int petId;
+  final double weight;
+  final DateTime date;
+  final String note;
+
+  const WeightLog({
+    this.id,
+    required this.petId,
+    required this.weight,
+    required this.date,
+    this.note = '',
+  });
+
+  Map<String, Object?> toMap() => {
+    'id': id,
+    'pet_id': petId,
+    'weight': weight,
+    'date': isoDate(date),
+    'note': note,
+  };
+
+  factory WeightLog.fromMap(Map<String, Object?> m) => WeightLog(
+    id: m['id'] as int?,
+    petId: m['pet_id'] as int,
+    weight: (m['weight'] as num).toDouble(),
+    date: DateTime.parse(m['date'] as String),
+    note: m['note'] as String? ?? '',
+  );
+}
+
+/// Sac / stock de nourriture d'un animal (module Alimentation).
+///
+/// Le reste est estimé : `bagGrams - jours écoulés × dailyGrams`
+/// depuis `openedDate` (ouverture du sac).
+class FoodStock {
+  final int? id;
+  final int petId;
+  final String name;
+  final int bagGrams;
+  final int dailyGrams;
+  final DateTime openedDate;
+  final int alertDays;
+
+  const FoodStock({
+    this.id,
+    required this.petId,
+    required this.name,
+    required this.bagGrams,
+    required this.dailyGrams,
+    required this.openedDate,
+    this.alertDays = 3,
+  });
+
+  /// Nombre total de jours couverts par le sac.
+  double get totalDays => dailyGrams <= 0 ? 0 : bagGrams / dailyGrams;
+
+  /// Date à laquelle le sac sera vide.
+  DateTime get runOutDate {
+    final d = DateTime(openedDate.year, openedDate.month, openedDate.day);
+    return d.add(Duration(days: totalDays.floor()));
+  }
+
+  int remainingGrams([DateTime? now]) {
+    if (dailyGrams <= 0) return bagGrams;
+    final today = _day(now ?? DateTime.now());
+    final days = today.difference(_day(openedDate)).inDays;
+    final elapsed = days < 0 ? 0 : days;
+    final left = bagGrams - elapsed * dailyGrams;
+    return left.clamp(0, bagGrams);
+  }
+
+  int daysLeft([DateTime? now]) =>
+      dailyGrams <= 0 ? 0 : remainingGrams(now) ~/ dailyGrams;
+
+  /// Part restante entre 0 et 1 (barre de progression).
+  double remainingRatio([DateTime? now]) =>
+      bagGrams <= 0 ? 0 : remainingGrams(now) / bagGrams;
+
+  bool isLow([DateTime? now]) => daysLeft(now) <= alertDays;
+
+  /// Jour (à 9h) où l'alerte « stock bas » doit partir.
+  DateTime get alertDate {
+    final d = runOutDate.subtract(Duration(days: alertDays));
+    return DateTime(d.year, d.month, d.day, 9);
+  }
+
+  static DateTime _day(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  Map<String, Object?> toMap() => {
+    'id': id,
+    'pet_id': petId,
+    'name': name,
+    'bag_grams': bagGrams,
+    'daily_grams': dailyGrams,
+    'opened_date': isoDate(openedDate),
+    'alert_days': alertDays,
+  };
+
+  factory FoodStock.fromMap(Map<String, Object?> m) => FoodStock(
+    id: m['id'] as int?,
+    petId: m['pet_id'] as int,
+    name: m['name'] as String,
+    bagGrams: m['bag_grams'] as int,
+    dailyGrams: m['daily_grams'] as int,
+    openedDate: DateTime.parse(m['opened_date'] as String),
+    alertDays: m['alert_days'] as int? ?? 3,
+  );
+
+  FoodStock copyWith({
+    int? id,
+    String? name,
+    int? bagGrams,
+    int? dailyGrams,
+    DateTime? openedDate,
+    int? alertDays,
+  }) => FoodStock(
+    id: id ?? this.id,
+    petId: petId,
+    name: name ?? this.name,
+    bagGrams: bagGrams ?? this.bagGrams,
+    dailyGrams: dailyGrams ?? this.dailyGrams,
+    openedDate: openedDate ?? this.openedDate,
+    alertDays: alertDays ?? this.alertDays,
+  );
+}
+
+/// Date sans l'heure.
+DateTime dayOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+/// Minuscules, sans accents ni ligatures — pour comparer des textes saisis.
+String normalizeText(String raw) {
+  const from = 'àâäáãåçéèêëíìîïñóòôöõúùûüýÿ';
+  const to = 'aaaaaaceeeeiiiinooooouuuuyy';
+  final buf = StringBuffer();
+  for (final ch in raw.toLowerCase().split('')) {
+    final i = from.indexOf(ch);
+    if (i >= 0) {
+      buf.write(to[i]);
+    } else if (ch == 'œ') {
+      buf.write('oe');
+    } else if (ch == 'æ') {
+      buf.write('ae');
+    } else if (ch == '’') {
+      buf.write("'");
+    } else {
+      buf.write(ch);
+    }
+  }
+  return buf.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
+/// `AAAA-MM-JJ` (tri SQL).
+String isoDate(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+/// « 12,5 » / « 12.5 » → 12.5
+double? parseDecimal(String raw) =>
+    double.tryParse(raw.trim().replaceAll(',', '.'));
+
+/// Convertit une quantité libre (« 100 g », « 0,5 kg », « 1.2kg ») en grammes.
+/// Renvoie null si aucune masse n'est reconnue (ex. « 1 boîte »).
+int? parseGrams(String raw) {
+  final m = RegExp(
+    r'(\d+(?:[.,]\d+)?)\s*(kg|g)\b',
+    caseSensitive: false,
+  ).firstMatch(raw);
+  if (m == null) return null;
+  final value = double.tryParse(m.group(1)!.replaceAll(',', '.'));
+  if (value == null) return null;
+  final grams = m.group(2)!.toLowerCase() == 'kg' ? value * 1000 : value;
+  return grams.round();
 }
 
 enum NotificationType {

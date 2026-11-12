@@ -182,8 +182,7 @@ class PetDetailScreen extends StatelessWidget {
                       confirmLabel: 'Supprimer',
                     );
                     if (ok && context.mounted && pet.id != null) {
-                      await LocalNotifications.instance.cancel(
-                          LocalNotifications.birthdayId(pet.id!));
+                      await LocalNotifications.instance.cancelForPet(pet.id!);
                       await PetRepository().delete(pet.id!);
                       if (context.mounted) Navigator.pop(context);
                     }

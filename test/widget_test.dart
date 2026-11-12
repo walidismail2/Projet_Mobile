@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_example/screens/auth/welcome_screen.dart';
+import 'package:flutter_example/modules/compte/screens/auth/welcome_screen.dart';
 import 'package:flutter/material.dart';
 
 void main() {
