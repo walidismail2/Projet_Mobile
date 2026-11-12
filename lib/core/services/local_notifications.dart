@@ -8,6 +8,7 @@ import 'package:flutter_example/core/data/session.dart';
 import 'package:flutter_example/core/models/models.dart';
 import 'package:flutter_example/modules/compte/repositories/appointment_repository.dart';
 import 'package:flutter_example/modules/alimentation/repositories/food_repository.dart';
+import 'package:flutter_example/modules/alimentation/repositories/food_stock_repository.dart';
 import 'package:flutter_example/modules/sante/repositories/health_repository.dart';
 import 'package:flutter_example/modules/animaux/repositories/pet_repository.dart';
 import 'package:flutter_example/modules/compte/repositories/reminder_repository.dart';
@@ -27,6 +28,7 @@ class LocalNotifications {
   static int appointmentId(int id) => 400000 + id;
   static int mealId(int id) => 500000 + id;
   static int birthdayId(int petId) => 600000 + petId;
+  static int stockId(int id) => 700000 + id;
 
   Future<void> init() async {
     tzdata.initializeTimeZones();
@@ -64,6 +66,51 @@ class LocalNotifications {
   Future<void> cancel(int id) async {
     if (!_ready) return;
     await _plugin.cancel(id: id);
+  }
+
+  /// Annule toutes les notifications liées à un animal (avant suppression).
+  Future<void> cancelForPet(int petId) async {
+    await cancel(birthdayId(petId));
+    for (final meal in await FoodRepository().getMeals(petId)) {
+      if (meal.id != null) await cancel(mealId(meal.id!));
+    }
+    for (final stock in await FoodStockRepository().getStocks(petId)) {
+      if (stock.id != null) await cancel(stockId(stock.id!));
+    }
+  }
+
+  /// Alerte « stock bas » à 9h, `alertDays` jours avant que le sac soit vide.
+  /// Si le stock est déjà bas, enregistre aussi une alerte dans l'app.
+  Future<void> scheduleFoodStock(
+    FoodStock stock, {
+    required String petName,
+    bool recordInApp = false,
+  }) async {
+    final id = stock.id;
+    if (id == null) return;
+    await cancel(stockId(id));
+    if (stock.dailyGrams <= 0) return;
+    final days = stock.daysLeft();
+    if (stock.isLow()) {
+      if (recordInApp) {
+        await _inbox(
+          title: 'Stock bas 🛒',
+          message: days == 0
+              ? '${stock.name} de $petName est épuisé.'
+              : '${stock.name} de $petName : plus que $days jour(s).',
+          type: NotificationType.meal,
+          petId: stock.petId,
+        );
+      }
+      return;
+    }
+    await _schedule(
+      notificationId: stockId(id),
+      type: NotificationType.meal,
+      title: 'Stock bas 🛒',
+      body: '${stock.name} de $petName : plus que ${stock.alertDays} jour(s).',
+      when: stock.alertDate,
+    );
   }
 
   Future<void> scheduleVaccine({
@@ -119,26 +166,32 @@ class LocalNotifications {
     }
   }
 
+  /// Repas quotidien (`date == null`) : chaque jour à l'heure.
+  /// Repas ponctuel : une seule fois, ce jour-là (rien si déjà passé).
   Future<void> scheduleMeal({
     required int id,
     required String name,
     required String time,
+    DateTime? date,
     bool recordInApp = false,
   }) async {
+    await cancel(mealId(id));
     final (h, m) = _hm(time);
-    final now = DateTime.now();
+    final day = date ?? DateTime.now();
     await _schedule(
       notificationId: mealId(id),
       type: NotificationType.meal,
       title: 'Repas',
       body: '$name · $time',
-      when: DateTime(now.year, now.month, now.day, h, m),
-      repeat: DateTimeComponents.time,
+      when: DateTime(day.year, day.month, day.day, h, m),
+      repeat: date == null ? DateTimeComponents.time : null,
     );
     if (recordInApp) {
       await _inbox(
         title: 'Repas',
-        message: '$name à $time',
+        message: date == null
+            ? '$name à $time, tous les jours'
+            : '$name le ${formatFrDate(date)} à $time',
         type: NotificationType.meal,
       );
     }
@@ -271,7 +324,15 @@ class LocalNotifications {
       for (final meal in await food.getMeals(petId)) {
         final id = meal.id;
         if (id == null) continue;
-        await scheduleMeal(id: id, name: meal.name, time: meal.time);
+        await scheduleMeal(
+          id: id,
+          name: meal.name,
+          time: meal.time,
+          date: meal.date,
+        );
+      }
+      for (final stock in await FoodStockRepository().getStocks(petId)) {
+        await scheduleFoodStock(stock, petName: pet.name);
       }
     }
     for (final appointment in await AppointmentRepository().getAll()) {
@@ -373,8 +434,10 @@ class LocalNotifications {
     required String title,
     required String message,
     required NotificationType type,
+    int? petId,
   }) async {
     await _reminders.insertNotification(AppNotification(
+      petId: petId,
       title: title,
       message: message,
       time: "À l'instant",

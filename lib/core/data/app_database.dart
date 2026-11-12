@@ -19,7 +19,7 @@ class AppDatabase {
     final path = join(dir.path, 'petcare.db');
     return openDatabase(
       path,
-      version: 10,
+      version: 12,
       onCreate: (db, _) => _createTables(db),
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -108,8 +108,99 @@ class AppDatabase {
         if (oldVersion < 10) {
           await _addColumnIfMissing(db, 'users', 'photo_path', 'TEXT');
         }
+        if (oldVersion < 11) {
+          await _createAlimentationV11(db);
+        }
+        if (oldVersion < 12) {
+          await _migrateAlimentationV12(db);
+        }
       },
     );
+  }
+
+  /// v11 — Alimentation : suivi du poids + stock de nourriture.
+  Future<void> _createAlimentationV11(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS weight_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pet_id INTEGER NOT NULL,
+        weight REAL NOT NULL,
+        date TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT ''
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_weight_logs_pet ON weight_logs (pet_id, date)');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS food_stock (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pet_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        bag_grams INTEGER NOT NULL,
+        daily_grams INTEGER NOT NULL,
+        opened_date TEXT NOT NULL,
+        alert_days INTEGER NOT NULL DEFAULT 3
+      )
+    ''');
+  }
+
+  /// v12 — Alimentation : repas datés (quotidien / ponctuel), « fait » par
+  /// jour (`meal_logs`), produits Open Pet Food Facts (`pet_food_cache`).
+  Future<void> _migrateAlimentationV12(Database db) async {
+    final now = DateTime.now();
+    final today = '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+
+    await _addColumnIfMissing(db, 'meals', 'date', 'TEXT');
+    await _addColumnIfMissing(
+        db, 'meals', 'created_on', "TEXT NOT NULL DEFAULT ''");
+    await _addColumnIfMissing(db, 'meals', 'product_code', 'TEXT');
+    await _addColumnIfMissing(db, 'meals', 'kcal_100g', 'REAL');
+    await db.update('meals', {'created_on': today},
+        where: "created_on = ''");
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS meal_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        meal_id INTEGER,
+        pet_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        meal_name TEXT NOT NULL,
+        time TEXT NOT NULL,
+        food TEXT NOT NULL,
+        quantity TEXT NOT NULL,
+        calories INTEGER NOT NULL,
+        UNIQUE (meal_id, date)
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_meal_logs_pet ON meal_logs (pet_id, date)');
+
+    // Les repas cochés « fait » deviennent le log d'aujourd'hui.
+    await db.execute('''
+      INSERT OR IGNORE INTO meal_logs
+        (meal_id, pet_id, date, meal_name, time, food, quantity, calories)
+      SELECT id, pet_id, ?, name, time, food, quantity, calories
+      FROM meals WHERE done = 1
+    ''', [today]);
+    await db.update('meals', {'done': 0});
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pet_food_cache (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        brand TEXT NOT NULL DEFAULT '',
+        image_url TEXT NOT NULL DEFAULT '',
+        quantity TEXT NOT NULL DEFAULT '',
+        species TEXT NOT NULL DEFAULT '',
+        kcal_100g REAL,
+        kcal_estimated INTEGER NOT NULL DEFAULT 0,
+        ingredients TEXT NOT NULL DEFAULT '',
+        search_text TEXT NOT NULL DEFAULT '',
+        fetched_at TEXT NOT NULL
+      )
+    ''');
   }
 
   Future<void> _addColumnIfMissing(
@@ -324,5 +415,7 @@ class AppDatabase {
         quantity INTEGER NOT NULL DEFAULT 1
       )
     ''');
+    await _createAlimentationV11(db);
+    await _migrateAlimentationV12(db);
   }
 }

@@ -25,6 +25,13 @@ Sur la **fiche animal** → section **Idéal race & âge** :
 - Suggestions de vaccins selon espèce + âge ([WSAVA](https://wsava.org/global-guidelines/vaccination-guidelines/))
 - Cache SQLite hors ligne (`health_tips_cache`)
 
+### Module Alimentation
+- **[Open Pet Food Facts](https://world.openpetfoodfacts.org)** (sans clé, ODbL) : recherche de croquettes / pâtées par nom, marque ou code-barres → nom, photo, ingrédients, **kcal/100 g** (déclarées, sinon estimées par la formule d’Atwater modifiée) → calories du repas calculées depuis la quantité
+- Ingrédients du produit comparés aux **interdits du véto** et à une base d’**aliments toxiques**
+- Cache SQLite (`pet_food_cache`) : recherche hors ligne sur les produits déjà vus
+- **Historique des repas** : recherche « Royal Canin ce mois-ci » (texte, période, type de repas) → nombre de repas, kcal, kcal/jour, quantité mangée ; toucher un jour l’ouvre
+- **« Peut-il manger ça ? »** : recherche hors ligne (chocolat, raisin, fromage…) → ☠️ toxique / ⛔ interdit véto / ⚠️ à éviter / ✅ sans danger, selon l’espèce
+
 ### Module Compte
 - Inscription propriétaire → **adresse** ou GPS (`36,6833, 10,3007`) via [Nominatim](https://nominatim.openstreetmap.org) → recommandation du **vétérinaire le plus proche**
 - **Trouver un vétérinaire** → [Overpass / OpenStreetMap](https://wiki.openstreetmap.org/wiki/Overpass_API) liste les vrais cabinets `amenity=veterinary` autour de l’adresse (+ seed SQLite, fallback Nominatim, cache local)
@@ -43,13 +50,13 @@ lib/
     compte/             # auth, profil (photo/MDP), vétos OSM, RDV, notifs, rôle véto
 ```
 
-Tout est stocké dans `petcare.db` sur l’appareil (migrations jusqu’à **v10**).
+Tout est stocké dans `petcare.db` sur l’appareil (migrations jusqu’à **v12**).
 
 | Module | Tables SQLite |
 |---|---|
 | **1. Animaux** | `pets`, `accessories`, `cart_items` |
 | **2. Santé** | `vaccines`, `treatments`, `medical_documents`, `health_tips_cache` |
-| **3. Alimentation** | `meals`, `diets`, `food_items` |
+| **3. Alimentation** | `meals`, `meal_logs`, `diets`, `food_items`, `weight_logs`, `food_stock`, `pet_food_cache` |
 | **4. Compte** | `users` (hash + adresse/GPS + `photo_path`), `appointments`, `notifications`, `custom_reminders`, `vets_cache` |
 
 ## 4 modules — CRUD + SQLite
@@ -58,7 +65,7 @@ Tout est stocké dans `petcare.db` sur l’appareil (migrations jusqu’à **v10
 |---|---|---|---|---|---|
 | 1 | **Animaux** | Animal + panier (+ accessoire **admin**) | Liste + boutique | Modifier | Supprimer |
 | 2 | **Santé** | Vaccin / traitement / document | Onglets | Modifier | Supprimer |
-| 3 | **Alimentation** | Ajouter un repas | Liste + régime | Modifier + « fait » | Supprimer |
+| 3 | **Alimentation** | Repas (quotidien / ponctuel), pesée, sac | Repas par jour + historique, régime, poids, stock, recherche produit / « Peut-il manger ça ? » | Modifier + « fait » du jour + nouveau sac | Supprimer |
 | 4 | **Compte** | Inscription + RDV + rappel | Profil / notifs / RDV | Profil, photo, MDP, RDV | Supprimer RDV / notif |
 
 Navigation : 4 onglets — Animaux, Santé, Alimentation, Compte.
@@ -80,9 +87,10 @@ Onglets : Vaccins, Soins, Docs (+ bandeau conseil météo).
 
 | Qui | Fait quoi |
 |---|---|
-| Propriétaire | Ajoute les repas du jour (`meals`) |
+| Propriétaire | Ajoute des repas **quotidiens** ou **ponctuels** (`meals`), les coche jour par jour (`meal_logs`) et navigue dans l’historique |
 | Vétérinaire | Cherche le propriétaire par e-mail (même base SQLite) et prescrit régime + aliments (`diets`, `food_items`) |
-| Propriétaire | Voit le régime en lecture seule dans Alimentation |
+| Propriétaire | Voit le régime en lecture seule dans Alimentation + reçoit une notification « Nouvelle prescription » |
+| Propriétaire | Suit le **poids** (pesées + courbe, `pets.weight` mis à jour) et le **stock** de nourriture (jours restants, alerte « stock bas ») |
 
 > Proprio et véto doivent utiliser **le même appareil / la même base** pour la prescription (app 100 % offline).
 
@@ -93,7 +101,7 @@ Recherche OSM via Overpass ; pas de carte Google Maps intégrée : adresse texte
 
 ## Notifications
 
-Alertes locales (`flutter_local_notifications`) : vaccins, traitements, repas, RDV, anniversaires, rappels personnalisés.
+Alertes locales (`flutter_local_notifications`) : vaccins, traitements, repas, stock de nourriture bas, RDV, anniversaires, rappels personnalisés.
 
 ## Lancer
 

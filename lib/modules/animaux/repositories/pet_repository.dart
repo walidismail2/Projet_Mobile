@@ -1,5 +1,6 @@
 import 'package:flutter_example/core/data/app_database.dart';
 import 'package:flutter_example/core/models/models.dart';
+import 'package:flutter_example/modules/alimentation/repositories/food_repository.dart';
 
 class PetRepository {
   final _db = AppDatabase.instance;
@@ -39,9 +40,15 @@ class PetRepository {
     );
   }
 
+  /// Supprime l'animal et ses données Alimentation (repas, régime,
+  /// aliments, pesées, stock) dans une seule transaction.
+  /// Annuler les notifications avant : `LocalNotifications.cancelForPet`.
   Future<void> delete(int id) async {
     final db = await _db.database;
-    await db.delete('pets', where: 'id = ?', whereArgs: [id]);
+    await db.transaction((txn) async {
+      await FoodRepository.deleteAllForPet(txn, id);
+      await txn.delete('pets', where: 'id = ?', whereArgs: [id]);
+    });
   }
 
   /// Recherche locale des animaux d’un propriétaire par e-mail (module véto).

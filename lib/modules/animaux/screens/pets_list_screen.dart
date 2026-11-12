@@ -26,6 +26,18 @@ class _PetsListScreenState extends State<PetsListScreen> {
   void initState() {
     super.initState();
     _reload();
+    // Poids modifié depuis Alimentation (pesées), etc.
+    AppRefresh.instance.addListener(_onDataChanged);
+  }
+
+  @override
+  void dispose() {
+    AppRefresh.instance.removeListener(_onDataChanged);
+    super.dispose();
+  }
+
+  void _onDataChanged() {
+    if (mounted) setState(_reload);
   }
 
   void _reload() {
@@ -127,8 +139,7 @@ class _PetsListScreenState extends State<PetsListScreen> {
                                 confirmLabel: 'Supprimer',
                               );
                               if (ok && mounted) {
-                                await LocalNotifications.instance.cancel(
-                                    LocalNotifications.birthdayId(pet.id!));
+                                await LocalNotifications.instance.cancelForPet(pet.id!);
                                 await _repo.delete(pet.id!);
                                 setState(_reload);
                                 AppRefresh.instance.petsChanged();
